@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+build/
+*.egg
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+topology-explorer/node_modules/
+topology-explorer/dist/
+topology-explorer/.vite/
+
+# Logs
+*.log
+dev.out.log
+dev.err.log
+
+# OS
+.DS_Store
+Thumbs.db

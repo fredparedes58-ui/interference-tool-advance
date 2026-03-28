@@ -1,0 +1,16 @@
+{
+  "version": 8,
+  "name": "Offline Minimal",
+  "sprite": "",
+  "glyphs": "",
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#0b1220"
+      }
+    }
+  ]
+}

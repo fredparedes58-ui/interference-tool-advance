@@ -1,0 +1,99 @@
+thresholds:
+  ul_sinr_bad_db: -3
+  ul_sinr_very_bad_db: -6
+  pim_reliability_thr: 0.55
+  delta_ports_db_thr: 4.0
+  delta_prb_db_thr: 4.5
+  traffic_corr_thr: 0.5
+  pusch_bler_high: 0.15
+  harq_dtx_high: 0.2
+  harq_nack_high: 0.15
+  pucch_bler_high: 0.15
+  pucch_bler_very_high: 0.25
+  sr_fail_rate_high: 0.05
+  edge_peaks_strength_high_db: 3.0
+  pdcch_util_high: 0.85
+  cce_blocking_high: 0.1
+  ul_rlc_retx_high: 0.15
+  rlc_buffer_high: 0.8
+  load_imbalance_thr: 0.2
+  qci1_users_min: 1
+  spectrogram_power_dbm_thr: -95
+  spectrogram_hour_fraction_thr: 0.4
+  spectrogram_rop_fraction_thr: 0.4
+  spectrogram_affect_med: 0.2
+  spectrogram_affect_high: 0.4
+
+rule_switches:
+  ATMOSPHERIC_DUCT_INTERFERENCE: true
+  PIM_CONFIRMED: true
+  PIM_SUSPECTED: true
+  EXTERNAL_WIDEBAND_UL_INTERFERENCE: true
+  EXTERNAL_NARROWBAND_UL_INTERFERENCE: true
+  UL_INTERFERENCE_LIMITED_CAPACITY: true
+  PUCCH_EDGE_BAND_ISSUE: true
+  PUCCH_EDGE_OR_CONTROL_LIMITATION: true
+  OUT_OF_COVERAGE_UES_WASTING_UL: true
+  VOICE_QCI1_AT_RISK: true
+  PDCCH_CONGESTION_OR_LA_MISMATCH: true
+  UL_RLC_RETX_CONGESTION: true
+  LOAD_IMBALANCE_INTERFREQ: true
+  NR_MASSIVE_MIMO_COCHANNEL_DL_INTERFERENCE: true
+  EMF_POWER_CAP_LIMITING: true
+  UL_LATENCY: true
+  SERVICE_OR_PRIORITY_POLICY_VIOLATION: true
+  UNKNOWN_AMBIGUOUS: true
+
+base_confidence:
+  hard: 0.7
+  soft: 0.35
+
+weights:
+  ATMOSPHERIC_DUCT_INTERFERENCE:
+    tdd: 0.3
+    duct_flag: 0.7
+  PIM_CONFIRMED:
+    pim_class: 0.6
+    pim_reliability: 0.4
+  PIM_SUSPECTED:
+    pim_class: 0.6
+    traffic_corr: 0.4
+  EXTERNAL_WIDEBAND_UL_INTERFERENCE:
+    ei_neighbor_match: 0.6
+    wideband_flag: 0.4
+  EXTERNAL_NARROWBAND_UL_INTERFERENCE:
+    narrowband_flag: 1.0
+  UL_INTERFERENCE_LIMITED_CAPACITY:
+    ul_sinr_bad: 0.6
+    has_4rx: 0.4
+  OUT_OF_COVERAGE_UES_WASTING_UL:
+    harq_dtx_high: 0.6
+    ul_sinr_bad: 0.4
+  VOICE_QCI1_AT_RISK:
+    qci1_degraded: 0.6
+    qci1_users: 0.2
+    harq_dtx_high: 0.2
+  PUCCH_EDGE_OR_CONTROL_LIMITATION:
+    pucch_bler_high: 0.5
+    sr_fail_rate_high: 0.2
+    edge_peaks_flag: 0.2
+    edge_peaks_strength: 0.1
+  PUCCH_EDGE_BAND_ISSUE:
+    pucch_bler_high: 0.7
+    band_issue: 0.3
+  PDCCH_CONGESTION_OR_LA_MISMATCH:
+    pdcch_util: 1.0
+  UL_RLC_RETX_CONGESTION:
+    rlc_retx: 1.0
+  LOAD_IMBALANCE_INTERFREQ:
+    imbalance: 1.0
+  NR_MASSIVE_MIMO_COCHANNEL_DL_INTERFERENCE:
+    mmimo_dl: 1.0
+  EMF_POWER_CAP_LIMITING:
+    emf_cap: 1.0
+  UL_LATENCY:
+    latency: 1.0
+  SERVICE_OR_PRIORITY_POLICY_VIOLATION:
+    policy: 1.0
+  UNKNOWN_AMBIGUOUS:
+    none: 1.0

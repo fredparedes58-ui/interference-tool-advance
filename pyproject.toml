@@ -1,0 +1,21 @@
+[project]
+name = "interference-advisor"
+version = "0.1.0"
+description = "Interference Recommendation Engine for RAN"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.6",
+  "typer>=0.12",
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+interf-advisor = "interference_advisor.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

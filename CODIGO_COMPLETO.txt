@@ -1,0 +1,1400 @@
+================================================================================
+INTERFERENCE TOOL - CÓDIGO FUENTE COMPLETO
+================================================================================
+Proyecto: Interference Recommendation Engine + Topology Explorer
+Estructura: Python Backend + React/TypeScript Frontend
+Fecha: Marzo 2026
+
+================================================================================
+PARTE 1: BACKEND PYTHON - INTERFERENCE ADVISOR
+================================================================================
+
+--- FILE: interference_advisor/__init__.py ---
+__all__ = ["cli", "engine", "models", "rules"]
+
+
+--- FILE: interference_advisor/cli.py ---
+import json
+from typing import Optional
+
+import typer
+
+from .engine import evaluate, evaluate_many
+from .io import load_snapshots, save_output
+from .rules import RulesConfig
+
+app = typer.Typer(no_args_is_help=True)
+
+
+@app.command()
+def run(
+    input: str = typer.Option(..., "--input", help="Input metrics JSON"),
+    out: str = typer.Option(..., "--out", help="Output JSON"),
+    rules: str = typer.Option("rules.yaml", "--rules", help="Rules YAML"),
+) -> None:
+    rules_config = RulesConfig.load(rules)
+    snapshots = load_snapshots(input)
+    results = evaluate_many(snapshots, rules_config)
+    save_output(out, [item.model_dump() for item in results])
+
+
+@app.command()
+def explain(
+    cell: str = typer.Option(..., "--cell", help="Cell ID"),
+    day: str = typer.Option(..., "--day", help="YYYY-MM-DD"),
+    input: str = typer.Option("metrics.json", "--input", help="Input metrics JSON"),
+    rules: str = typer.Option("rules.yaml", "--rules", help="Rules YAML"),
+) -> None:
+    rules_config = RulesConfig.load(rules)
+    snapshots = load_snapshots(input)
+    match = None
+    for snap in snapshots:
+        if snap.cell_id == cell and (snap.snapshot_day == day):
+            match = snap
+            break
+
+    if not match:
+        raise typer.Exit(code=1)
+
+    output = evaluate(match, rules_config)
+    typer.echo(json.dumps(output.model_dump(), indent=2))
+
+
+if __name__ == "__main__":
+    app()
+
+
+--- FILE: interference_advisor/io.py ---
+import json
+from typing import List
+
+from .models import CellSnapshot
+
+
+def load_snapshots(path: str) -> List[CellSnapshot]:
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    if isinstance(raw, dict) and "snapshots" in raw:
+        items = raw["snapshots"]
+    else:
+        items = raw
+
+    if not isinstance(items, list):
+        raise ValueError("Input JSON must be a list or contain 'snapshots' list.")
+
+    return [CellSnapshot.model_validate(item) for item in items]
+
+
+def save_output(path: str, payload: object) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+
+
+--- FILE: interference_advisor/rules.py ---
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict
+
+import yaml
+
+
+@dataclass
+class RulesConfig:
+    thresholds: Dict[str, float] = field(default_factory=dict)
+    rule_switches: Dict[str, bool] = field(default_factory=dict)
+    weights: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    base_confidence: Dict[str, float] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, path: str) -> "RulesConfig":
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = yaml.safe_load(handle) or {}
+        return cls(
+            thresholds=raw.get("thresholds", {}),
+            rule_switches=raw.get("rule_switches", {}),
+            weights=raw.get("weights", {}),
+            base_confidence=raw.get("base_confidence", {}),
+        )
+
+
+--- FILE: interference_advisor/models.py ---
+from __future__ import annotations
+
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class NeighborRelation(BaseModel):
+    neighbor_cell_id: str
+    same_band: Optional[bool] = None
+    vendor: Optional[str] = None
+    relation_type: Optional[str] = None
+
+
+class NiPrbProfile(BaseModel):
+    delta_prb_db: Optional[float] = None
+    edge_peaks_flag: Optional[bool] = None
+    wideband_flag: Optional[bool] = None
+    narrowband_flag: Optional[bool] = None
+    edge_peaks_strength_db: Optional[float] = None
+
+
+class Spectrogram(BaseModel):
+    cell_id: Optional[str] = None
+    time_bins: List[str] = Field(default_factory=list)
+    rop_bins_dbm: List[float] = Field(default_factory=list)
+    power_dbm: List[List[float]] = Field(default_factory=list)
+
+
+class SpectrogramEvidence(BaseModel):
+    affected_fraction: float
+    affected_hours: List[str]
+    affected_rop_bins_dbm: List[float]
+    max_power_dbm: Optional[float] = None
+    mean_power_dbm: Optional[float] = None
+
+
+class AffectationSummary(BaseModel):
+    level: Literal["low", "med", "high"]
+    score: float
+    kpi_evidence: List[str]
+
+
+class CellSnapshot(BaseModel):
+    snapshot_day: Optional[str] = None
+    snapshot_hour: Optional[int] = None
+
+    cell_id: str
+    site_id: Optional[str] = None
+    tech: Optional[Literal["LTE", "NR"]] = None
+    duplex: Optional[Literal["FDD", "TDD"]] = None
+    band: Optional[str] = None
+    bw_mhz: Optional[float] = None
+
+    has_4rx: Optional[bool] = None
+    is_aas: Optional[bool] = None
+    is_massive_mimo: Optional[bool] = None
+    is_combined_cell: Optional[bool] = None
+
+    neighbors: Optional[List[NeighborRelation]] = None
+
+    ul_sinr_db_p50: Optional[float] = None
+    ul_sinr_db_p10: Optional[float] = None
+    pusch_bler: Optional[float] = None
+    pucch_bler_p50: Optional[float] = None
+    pucch_bler_p95: Optional[float] = None
+    pucch_bler_avg: Optional[float] = None
+    rssi_p1_dbm: Optional[float] = None
+    rssi_p2_dbm: Optional[float] = None
+    rssi_p3_dbm: Optional[float] = None
+    rssi_p4_dbm: Optional[float] = None
+    rssi_avg_dbm: Optional[float] = None
+    delta_ports_db: Optional[float] = None
+    ni_prb_profile: Optional[NiPrbProfile] = None
+    harq_dtx_rate: Optional[float] = None
+    harq_nack_rate: Optional[float] = None
+    ul_thp_mbps: Optional[float] = None
+    dl_thp_mbps: Optional[float] = None
+    pdcch_util: Optional[float] = None
+    cce_blocking_rate: Optional[float] = None
+    rlc_buffer_usage: Optional[float] = None
+    ul_rlc_retx_rate: Optional[float] = None
+    sr_users: Optional[int] = None
+    cqi_users: Optional[int] = None
+    pucch_resource_pressure: Optional[float] = None
+    traffic_corr: Optional[float] = None
+    data_quality_flags: Optional[List[str]] = None
+
+    pim_class: Optional[
+        Literal["PIM_DISTRIBUIDO", "TRAFFIC_BASED", "EI", "AMBIGUO", "NONE"]
+    ] = None
+    pim_reliability: Optional[float] = None
+    worst_hour: Optional[int] = None
+    ei_neighbor_match_flag: Optional[bool] = None
+
+    irc_enabled: Optional[bool] = None
+    full_4x4_irc_enabled: Optional[bool] = None
+    irc_aas_fdd_enabled: Optional[bool] = None
+    duct_interference_reduction_enabled: Optional[bool] = None
+    duct_crs_muting_mode: Optional[Literal["NOT", "PARTIAL", "FULL"]] = None
+    pim_detection_enabled: Optional[bool] = None
+    pim_avoidance_enabled: Optional[bool] = None
+    ul_triggered_if_mobility_enabled: Optional[bool] = None
+    ul_search_threshold: Optional[float] = None
+    volte_ul_triggered_mobility_enabled: Optional[bool] = None
+    spifho_enabled: Optional[bool] = None
+    pucch_overdimensioning_enabled: Optional[bool] = None
+    dynamic_pucch_enabled: Optional[bool] = None
+    icic_autonomous_enabled: Optional[bool] = None
+    iflb_enabled: Optional[bool] = None
+    iflb_activation_threshold_enabled: Optional[bool] = None
+    ifo_enabled: Optional[bool] = None
+    ivlb_enabled: Optional[bool] = None
+    limited_ul_aware_iflb_enabled: Optional[bool] = None
+    ul_rlc_retx_threshold_enabled: Optional[bool] = None
+    decoupled_pdcch_la_enabled: Optional[bool] = None
+    out_of_coverage_ul_sched_ctrl_enabled: Optional[bool] = None
+    instant_uplink_access_enabled: Optional[bool] = None
+    intelligent_power_emission_control_enabled: Optional[bool] = None
+    multi_clustered_pusch_enabled: Optional[bool] = None
+
+    duct_pattern_flag: Optional[bool] = None
+    ampr_restriction_suspected: Optional[bool] = None
+    adjacent_band_interference_suspected: Optional[bool] = None
+    sr_fail_rate: Optional[float] = None
+    sr_success_rate: Optional[float] = None
+    cqi_report_drop_rate: Optional[float] = None
+
+    voice_allowed_on_serving_freq: Optional[bool] = None
+    emergency_location_requires: Optional[bool] = None
+    qci1_active_users: Optional[int] = None
+    qci1_kpi_degraded: Optional[bool] = None
+    arp_high_prio_users: Optional[int] = None
+    spifho_configured: Optional[bool] = None
+    servOrPrioTriggeredIFHo: Optional[Literal["NONE", "QCI", "ARP"]] = None
+    servOrPrioIFHoSetupBearer: Optional[bool] = None
+    ul_volte_triggered_mobility_enabled: Optional[bool] = None
+    ul_volte_triggered_mobility_mode: Optional[
+        Literal["BLINDHO", "MEASBASEDHO"]
+    ] = None
+
+    load_imbalance_flag: Optional[bool] = None
+    carrier_a_util: Optional[float] = None
+    carrier_b_util: Optional[float] = None
+    dl_interference_dominant: Optional[bool] = None
+    emf_power_cap_flag: Optional[bool] = None
+    ul_latency_sensitive: Optional[bool] = None
+    spectrogram: Optional[Spectrogram] = None
+
+
+class ConfigChange(BaseModel):
+    feature_id: Optional[str] = None
+    mo: Optional[str] = None
+    param: Optional[str] = None
+    value: Optional[object] = None
+    note: Optional[str] = None
+
+
+class ExpectedEffect(BaseModel):
+    kpi: str
+    target_direction: str
+    note: Optional[str] = None
+
+
+class RollbackPlan(BaseModel):
+    what_to_revert: str
+
+
+class ActionStep(BaseModel):
+    title: str
+    feature_id: Optional[str] = None
+    config_changes: List[ConfigChange] = Field(default_factory=list)
+    prerequisites: List[str] = Field(default_factory=list)
+    conflicts: List[str] = Field(default_factory=list)
+    expected_effect: List[ExpectedEffect] = Field(default_factory=list)
+    verify_with: List[str] = Field(default_factory=list)
+    rollback: Optional[RollbackPlan] = None
+    reason_codes: List[str] = Field(default_factory=list)
+
+
+class Recommendation(BaseModel):
+    category: str
+    confidence: float
+    severity: Literal["low", "med", "high"]
+    actions: List[ActionStep]
+    explanations: List[str]
+
+
+class AdvisoryOutput(BaseModel):
+    cell_id: str
+    snapshot_day: Optional[str] = None
+    recommendations: List[Recommendation]
+    explanations: List[str]
+    do_not_do: List[str]
+    spectral_evidence: Optional[SpectrogramEvidence] = None
+    affectation: Optional[AffectationSummary] = None
+
+
+--- FILE: interference_advisor/engine.py (RESUMEN - muy largo) ---
+from __future__ import annotations
+
+from typing import List
+
+from .models import (
+    ActionStep, AdvisoryOutput, AffectationSummary, CellSnapshot, ConfigChange,
+    ExpectedEffect, Recommendation, RollbackPlan, SpectrogramEvidence,
+)
+from .rules import RulesConfig
+
+
+def _get_threshold(rules: RulesConfig, key: str, default: float) -> float:
+    return float(rules.thresholds.get(key, default))
+
+
+def _rule_enabled(rules: RulesConfig, key: str) -> bool:
+    return bool(rules.rule_switches.get(key, True))
+
+
+def _confidence(
+    rules: RulesConfig,
+    category: str,
+    hard_trigger: bool,
+    score: float,
+) -> float:
+    base = rules.base_confidence.get("hard" if hard_trigger else "soft", 0.35)
+    weights = rules.weights.get(category, {})
+    max_score = sum(weights.values()) or 1.0
+    normalized = min(score / max_score, 1.0)
+    return min(base + normalized * 0.5, 1.0)
+
+
+def _severity(
+    snapshot: CellSnapshot, hard: bool, extra_high: bool = False
+) -> str:
+    if extra_high or hard:
+        return "high"
+    if snapshot.ul_sinr_db_p10 is not None and snapshot.ul_sinr_db_p10 < -6:
+        return "high"
+    if snapshot.ul_sinr_db_p50 is not None and snapshot.ul_sinr_db_p50 < -3:
+        return "med"
+    return "low"
+
+
+[MOTOR CONTINÚA CON +30 FUNCIONES DE RECOMENDACIÓN]
+[Ver archivo engine.py completo en el repositorio]
+
+
+--- FILE: rules.yaml ---
+thresholds:
+  ul_sinr_bad_db: -3
+  ul_sinr_very_bad_db: -6
+  pim_reliability_thr: 0.55
+  delta_ports_db_thr: 4.0
+  delta_prb_db_thr: 4.5
+  traffic_corr_thr: 0.5
+  pusch_bler_high: 0.15
+  harq_dtx_high: 0.2
+  harq_nack_high: 0.15
+  pucch_bler_high: 0.15
+  pucch_bler_very_high: 0.25
+  sr_fail_rate_high: 0.05
+  edge_peaks_strength_high_db: 3.0
+  pdcch_util_high: 0.85
+  cce_blocking_high: 0.1
+  ul_rlc_retx_high: 0.15
+  rlc_buffer_high: 0.8
+  load_imbalance_thr: 0.2
+  qci1_users_min: 1
+  spectrogram_power_dbm_thr: -95
+  spectrogram_hour_fraction_thr: 0.4
+  spectrogram_rop_fraction_thr: 0.4
+  spectrogram_affect_med: 0.2
+  spectrogram_affect_high: 0.4
+
+rule_switches:
+  ATMOSPHERIC_DUCT_INTERFERENCE: true
+  PIM_CONFIRMED: true
+  PIM_SUSPECTED: true
+  EXTERNAL_WIDEBAND_UL_INTERFERENCE: true
+  EXTERNAL_NARROWBAND_UL_INTERFERENCE: true
+  UL_INTERFERENCE_LIMITED_CAPACITY: true
+  PUCCH_EDGE_BAND_ISSUE: true
+  PUCCH_EDGE_OR_CONTROL_LIMITATION: true
+  OUT_OF_COVERAGE_UES_WASTING_UL: true
+  VOICE_QCI1_AT_RISK: true
+  PDCCH_CONGESTION_OR_LA_MISMATCH: true
+  UL_RLC_RETX_CONGESTION: true
+  LOAD_IMBALANCE_INTERFREQ: true
+  NR_MASSIVE_MIMO_COCHANNEL_DL_INTERFERENCE: true
+  EMF_POWER_CAP_LIMITING: true
+  UL_LATENCY: true
+  SERVICE_OR_PRIORITY_POLICY_VIOLATION: true
+  UNKNOWN_AMBIGUOUS: true
+
+base_confidence:
+  hard: 0.7
+  soft: 0.35
+
+weights:
+  ATMOSPHERIC_DUCT_INTERFERENCE:
+    tdd: 0.3
+    duct_flag: 0.7
+  PIM_CONFIRMED:
+    pim_class: 0.6
+    pim_reliability: 0.4
+  EXTERNAL_WIDEBAND_UL_INTERFERENCE:
+    ei_neighbor_match: 0.6
+    wideband_flag: 0.4
+  UL_INTERFERENCE_LIMITED_CAPACITY:
+    ul_sinr_bad: 0.6
+    has_4rx: 0.4
+  OUT_OF_COVERAGE_UES_WASTING_UL:
+    harq_dtx_high: 0.6
+    ul_sinr_bad: 0.4
+  VOICE_QCI1_AT_RISK:
+    qci1_degraded: 0.6
+    qci1_users: 0.2
+    harq_dtx_high: 0.2
+
+
+--- FILE: pyproject.toml ---
+[project]
+name = "interference-advisor"
+version = "0.1.0"
+description = "Interference Recommendation Engine for RAN"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.6",
+  "typer>=0.12",
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+interf-advisor = "interference_advisor.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+--- FILE: tests/test_engine.py ---
+import json
+from pathlib import Path
+
+from interference_advisor.engine import evaluate
+from interference_advisor.models import CellSnapshot, NiPrbProfile
+from interference_advisor.rules import RulesConfig
+
+RULES = RulesConfig.load(str(Path(__file__).resolve().parents[1] / "rules.yaml"))
+
+
+def find_category(output, category: str):
+    return next((rec for rec in output.recommendations if rec.category == category), None)
+
+
+def test_pim_confirmed():
+    snapshot = CellSnapshot(
+        cell_id="C1",
+        pim_class="PIM_DISTRIBUIDO",
+        pim_reliability=0.7,
+    )
+    output = evaluate(snapshot, RULES)
+    rec = find_category(output, "PIM_CONFIRMED")
+    assert rec is not None
+
+
+def test_ul_sinr_with_4rx():
+    snapshot = CellSnapshot(
+        cell_id="C2",
+        ul_sinr_db_p50=-6.0,
+        has_4rx=True,
+    )
+    output = evaluate(snapshot, RULES)
+    rec = find_category(output, "UL_INTERFERENCE_LIMITED_CAPACITY")
+    assert rec is not None
+
+
+def test_volte_conflict_spifho():
+    snapshot = CellSnapshot(
+        cell_id="C3",
+        qci1_kpi_degraded=True,
+        qci1_active_users=3,
+        spifho_configured=True,
+        servOrPrioTriggeredIFHo="QCI",
+    )
+    output = evaluate(snapshot, RULES)
+    rec = find_category(output, "VOICE_QCI1_AT_RISK")
+    assert rec is not None
+    assert any("SPIFHO" in conflict for action in rec.actions for conflict in action.conflicts)
+
+
+def test_pucch_edge_overdimensioning():
+    snapshot = CellSnapshot(
+        cell_id="C4",
+        pucch_bler_avg=0.2,
+        ampr_restriction_suspected=True,
+        ni_prb_profile=NiPrbProfile(edge_peaks_flag=True),
+    )
+    output = evaluate(snapshot, RULES)
+    rec = find_category(output, "PUCCH_EDGE_OR_CONTROL_LIMITATION")
+    assert rec is not None
+
+
+========================================================================================
+PARTE 2: FRONTEND - REACT/TYPESCRIPT - TOPOLOGY EXPLORER
+========================================================================================
+
+--- FILE: topology-explorer/package.json ---
+{
+  "name": "topology-explorer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.4"
+  }
+}
+
+
+--- FILE: topology-explorer/vite.config.ts ---
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true
+  }
+})
+
+
+--- FILE: topology-explorer/src/main.tsx ---
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+
+--- FILE: topology-explorer/src/types.ts ---
+export type Tech = 'LTE' | 'NR' | 'WCDMA' | 'GSM' | string
+
+export type Site = {
+  id: string
+  name: string
+  lat: number
+  lon: number
+  region?: string
+  city?: string
+}
+
+export type Cell = {
+  id: string
+  siteId: string
+  tech: string
+  band?: string
+  vendor?: string
+  hBeamwidth?: number
+  earfcn?: number
+  pci?: number
+  azimuth?: number
+  tilt?: number
+}
+
+export type InterferenceSample = {
+  cellId: string
+  hour: string
+  ni_db?: number
+  pusch_bler?: number
+  pucch_bler?: number
+  score?: number
+}
+
+export type Link = {
+  id: string
+  fromSiteId: string
+  toSiteId: string
+  kind?: string
+}
+
+export type Topology = {
+  version?: string
+  sites: Site[]
+  cells?: Cell[]
+  links?: Link[]
+  interferenceSamples?: InterferenceSample[]
+}
+
+export type NormalizedTopology = {
+  version: string
+  sites: Site[]
+  cells: Cell[]
+  links: Link[]
+  interferenceSamples: InterferenceSample[]
+}
+
+
+--- FILE: topology-explorer/src/topoNormalize.ts ---
+import type {
+  Cell,
+  InterferenceSample,
+  Link,
+  NormalizedTopology,
+  Site,
+  Topology,
+} from './types'
+
+type Result =
+  | { ok: true; data: NormalizedTopology }
+  | { ok: false; error: string }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const isString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0
+
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+const validateSites = (sites: unknown): Site[] | null => {
+  if (!Array.isArray(sites)) return null
+  const validated: Site[] = []
+  for (const raw of sites) {
+    if (!isRecord(raw)) return null
+    if (!isString(raw.id) || !isString(raw.name)) return null
+    if (!isNumber(raw.lat) || !isNumber(raw.lon)) return null
+    validated.push({
+      id: raw.id.trim(),
+      name: raw.name.trim(),
+      lat: raw.lat,
+      lon: raw.lon,
+      region: isString(raw.region) ? raw.region.trim() : undefined,
+      city: isString(raw.city) ? raw.city.trim() : undefined,
+    })
+  }
+  return validated
+}
+
+const validateCells = (cells: unknown): Cell[] | null => {
+  if (cells === undefined) return []
+  if (!Array.isArray(cells)) return null
+  const validated: Cell[] = []
+  for (const raw of cells) {
+    if (!isRecord(raw)) return null
+    if (!isString(raw.id) || !isString(raw.siteId) || !isString(raw.tech))
+      return null
+    validated.push({
+      id: raw.id.trim(),
+      siteId: raw.siteId.trim(),
+      tech: raw.tech.trim(),
+      band: isString(raw.band) ? raw.band.trim() : undefined,
+      vendor: isString(raw.vendor) ? raw.vendor.trim() : undefined,
+      hBeamwidth: isNumber(raw.hBeamwidth) ? raw.hBeamwidth : undefined,
+      earfcn: isNumber(raw.earfcn) ? raw.earfcn : undefined,
+      pci: isNumber(raw.pci) ? raw.pci : undefined,
+      azimuth: isNumber(raw.azimuth) ? raw.azimuth : undefined,
+      tilt: isNumber(raw.tilt) ? raw.tilt : undefined,
+    })
+  }
+  return validated
+}
+
+const validateLinks = (links: unknown): Link[] | null => {
+  if (links === undefined) return []
+  if (!Array.isArray(links)) return null
+  const validated: Link[] = []
+  for (const raw of links) {
+    if (!isRecord(raw)) return null
+    if (
+      !isString(raw.id) ||
+      !isString(raw.fromSiteId) ||
+      !isString(raw.toSiteId)
+    )
+      return null
+    validated.push({
+      id: raw.id.trim(),
+      fromSiteId: raw.fromSiteId.trim(),
+      toSiteId: raw.toSiteId.trim(),
+      kind: isString(raw.kind) ? raw.kind.trim() : undefined,
+    })
+  }
+  return validated
+}
+
+const validateInterferenceSamples = (
+  samples: unknown
+): InterferenceSample[] | null => {
+  if (samples === undefined) return []
+  if (!Array.isArray(samples)) return null
+  const validated: InterferenceSample[] = []
+  for (const raw of samples) {
+    if (!isRecord(raw)) return null
+    if (!isString(raw.cellId) || !isString(raw.hour)) return null
+    validated.push({
+      cellId: raw.cellId.trim(),
+      hour: raw.hour.trim(),
+      ni_db: isNumber(raw.ni_db) ? raw.ni_db : undefined,
+      pusch_bler: isNumber(raw.pusch_bler) ? raw.pusch_bler : undefined,
+      pucch_bler: isNumber(raw.pucch_bler) ? raw.pucch_bler : undefined,
+      score: isNumber(raw.score) ? raw.score : undefined,
+    })
+  }
+  return validated
+}
+
+export const normalizeTopology = (input: unknown): Result => {
+  if (!isRecord(input)) {
+    return { ok: false, error: 'El JSON debe ser un objeto.' }
+  }
+  const topo = input as Topology
+  const sites = validateSites(topo.sites)
+  if (!sites || sites.length === 0) {
+    return {
+      ok: false,
+      error: 'El campo "sites" es obligatorio y debe contener sitios validos.',
+    }
+  }
+  const cells = validateCells(topo.cells)
+  if (!cells) {
+    return {
+      ok: false,
+      error: 'El campo "cells" debe ser un arreglo valido si existe.',
+    }
+  }
+  const links = validateLinks(topo.links)
+  if (!links) {
+    return {
+      ok: false,
+      error: 'El campo "links" debe ser un arreglo valido si existe.',
+    }
+  }
+  const interferenceSamples = validateInterferenceSamples(topo.interferenceSamples)
+  if (!interferenceSamples) {
+    return {
+      ok: false,
+      error: 'El campo "interferenceSamples" debe ser un arreglo valido si existe.',
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      version: isString(topo.version) ? topo.version.trim() : '1.0',
+      sites,
+      cells,
+      links,
+      interferenceSamples,
+    },
+  }
+}
+
+
+--- FILE: topology-explorer/src/interference.ts ---
+import type { Cell, InterferenceSample, Site } from './types'
+
+type PointFeature = {
+  type: 'Feature'
+  geometry: { type: 'Point'; coordinates: [number, number] }
+  properties: { weight: number }
+}
+
+type FeatureCollection = {
+  type: 'FeatureCollection'
+  features: PointFeature[]
+}
+
+const clamp = (value: number, min = 0, max = 1) =>
+  Math.max(min, Math.min(max, value))
+
+const scoreFromSample = (sample: InterferenceSample) => {
+  if (sample.score !== undefined) return clamp(sample.score)
+  const values: number[] = []
+  if (sample.pusch_bler !== undefined) values.push(clamp(sample.pusch_bler))
+  if (sample.pucch_bler !== undefined) values.push(clamp(sample.pucch_bler))
+  if (sample.ni_db !== undefined) {
+    const normalized = (sample.ni_db - -120) / 40
+    values.push(clamp(normalized))
+  }
+  if (values.length === 0) return 0.2
+  return values.reduce((acc, value) => acc + value, 0) / values.length
+}
+
+const estimateSourceByTrilateration = (
+  measurements: { lat: number; lon: number; weight: number }[]
+) => {
+  if (measurements.length < 3) return null
+
+  const ref = measurements[0]
+  const maxDistKm = 30
+  const toXY = (lat: number, lon: number) => {
+    const rad = Math.PI / 180
+    const x = lon * 111.32 * Math.cos(lat * rad)
+    const y = lat * 110.57
+    return { x, y }
+  }
+
+  const refXY = toXY(ref.lat, ref.lon)
+  const refD = maxDistKm * (1 - ref.weight)
+
+  let a11 = 0
+  let a12 = 0
+  let a22 = 0
+  let b1 = 0
+  let b2 = 0
+
+  for (let i = 1; i < measurements.length; i += 1) {
+    const m = measurements[i]
+    const mXY = toXY(m.lat, m.lon)
+    const di = maxDistKm * (1 - m.weight)
+    const a = 2 * (mXY.x - refXY.x)
+    const b = 2 * (mXY.y - refXY.y)
+    const c =
+      refD * refD -
+      di * di -
+      refXY.x * refXY.x +
+      mXY.x * mXY.x -
+      refXY.y * refXY.y +
+      mXY.y * mXY.y
+    a11 += a * a
+    a12 += a * b
+    a22 += b * b
+    b1 += a * c
+    b2 += b * c
+  }
+
+  const det = a11 * a22 - a12 * a12
+  if (Math.abs(det) < 1e-6) return null
+  const x = (b1 * a22 - b2 * a12) / det
+  const y = (a11 * b2 - a12 * b1) / det
+
+  const lat = y / 110.57
+  const lon = x / (111.32 * Math.cos(lat * (Math.PI / 180)))
+  return { lat, lon }
+}
+
+export type InterferenceGridOptions = {
+  gridStepDeg: number
+  baseWeight: number
+}
+
+export const buildInterferenceGrid = (
+  samples: InterferenceSample[],
+  sites: Site[],
+  cells: Cell[],
+  selectedHour: string | null,
+  options: InterferenceGridOptions
+): FeatureCollection => {
+  if (sites.length === 0) {
+    return { type: 'FeatureCollection', features: [] }
+  }
+
+  const cellToSite = new Map<string, Site>()
+  const siteById = new Map<string, Site>()
+  sites.forEach((site) => siteById.set(site.id, site))
+  cells.forEach((cell) => {
+    const site = siteById.get(cell.siteId)
+    if (site) cellToSite.set(cell.id, site)
+  })
+
+  const filtered = samples.filter((sample) =>
+    selectedHour ? sample.hour === selectedHour : true
+  )
+
+  const measurements = filtered
+    .map((sample) => {
+      const site = cellToSite.get(sample.cellId)
+      if (!site) return null
+      return {
+        lat: site.lat,
+        lon: site.lon,
+        weight: scoreFromSample(sample),
+      }
+    })
+    .filter((item): item is { lat: number; lon: number; weight: number } =>
+      Boolean(item)
+    )
+
+  const estimated = estimateSourceByTrilateration(measurements)
+  if (estimated) {
+    measurements.push({ ...estimated, weight: 1 })
+  }
+
+  let minLat = sites[0].lat
+  let maxLat = sites[0].lat
+  let minLon = sites[0].lon
+  let maxLon = sites[0].lon
+  sites.forEach((site) => {
+    minLat = Math.min(minLat, site.lat)
+    maxLat = Math.max(maxLat, site.lat)
+    minLon = Math.min(minLon, site.lon)
+    maxLon = Math.max(maxLon, site.lon)
+  })
+
+  const padding = 0.2
+  minLat -= padding
+  maxLat += padding
+  minLon -= padding
+  maxLon += padding
+
+  const step = options.gridStepDeg
+  const base = options.baseWeight
+  const power = 2
+  const epsilon = 1e-6
+  const features: PointFeature[] = []
+
+  for (let lat = minLat; lat <= maxLat; lat += step) {
+    for (let lon = minLon; lon <= maxLon; lon += step) {
+      let numerator = 0
+      let denominator = 0
+      measurements.forEach((m) => {
+        const dLat = lat - m.lat
+        const dLon = lon - m.lon
+        const dist = Math.sqrt(dLat * dLat + dLon * dLon) + epsilon
+        const weight = 1 / Math.pow(dist, power)
+        numerator += m.weight * weight
+        denominator += weight
+      })
+      const value =
+        measurements.length === 0
+          ? base
+          : clamp(base + numerator / Math.max(denominator, epsilon))
+
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: { weight: value },
+      })
+    }
+  }
+
+  return { type: 'FeatureCollection', features }
+}
+
+
+--- FILE: topology-explorer/src/geojson.ts ---
+import type { Cell, Link, Site } from './types'
+
+type PointFeature = {
+  type: 'Feature'
+  geometry: { type: 'Point'; coordinates: [number, number] }
+  properties: Record<string, unknown>
+}
+
+type LineFeature = {
+  type: 'Feature'
+  geometry: { type: 'LineString'; coordinates: [number, number][] }
+  properties: Record<string, unknown>
+}
+
+type CellFeature = {
+  type: 'Feature'
+  geometry: { type: 'Point'; coordinates: [number, number] }
+  properties: Record<string, unknown>
+}
+
+type SectorFeature = {
+  type: 'Feature'
+  geometry: { type: 'Polygon'; coordinates: [number, number][][] }
+  properties: Record<string, unknown>
+}
+
+type FeatureCollection<T> = {
+  type: 'FeatureCollection'
+  features: T[]
+}
+
+export const sitesToGeoJSON = (
+  sites: Site[],
+  cellsBySite: Record<string, number>
+): FeatureCollection<PointFeature> => ({
+  type: 'FeatureCollection',
+  features: sites.map((site) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [site.lon, site.lat] },
+    properties: {
+      id: site.id,
+      name: site.name,
+      region: site.region,
+      city: site.city,
+      cellCount: cellsBySite[site.id] || 0,
+    },
+  })),
+})
+
+export const linksToGeoJSON = (
+  links: Link[],
+  siteById: Map<string, Site>
+): FeatureCollection<LineFeature> => ({
+  type: 'FeatureCollection',
+  features: (links
+    .map((link) => {
+      const from = siteById.get(link.fromSiteId)
+      const to = siteById.get(link.toSiteId)
+      if (!from || !to) return null
+      return {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[from.lon, from.lat], [to.lon, to.lat]] as [number, number][],
+        },
+        properties: {
+          id: link.id,
+          kind: link.kind,
+        },
+      }
+    })
+    .filter(Boolean) as LineFeature[]),
+})
+
+export const cellsToGeoJSON = (
+  cells: Cell[],
+  siteById: Map<string, Site>
+): FeatureCollection<CellFeature> => ({
+  type: 'FeatureCollection',
+  features: (() => {
+    const bySite = new Map<string, Cell[]>()
+    cells.forEach((cell) => {
+      const list = bySite.get(cell.siteId) ?? []
+      list.push(cell)
+      bySite.set(cell.siteId, list)
+    })
+
+    const features: CellFeature[] = []
+    bySite.forEach((siteCells, siteId) => {
+      const site = siteById.get(siteId)
+      if (!site) return
+      const count = siteCells.length
+      siteCells.forEach((cell, index) => {
+        const angle = (Math.PI * 2 * index) / Math.max(count, 1)
+        const radius = count > 1 ? 0.002 : 0
+        const latOffset = radius * Math.sin(angle)
+        const lonOffset =
+          radius * Math.cos(angle) / Math.cos((site.lat * Math.PI) / 180)
+
+        features.push({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [site.lon + lonOffset, site.lat + latOffset],
+          },
+          properties: {
+            id: cell.id,
+            siteId: cell.siteId,
+            tech: cell.tech,
+            band: cell.band ?? 'Unknown',
+          },
+        })
+      })
+    })
+    return features
+  })(),
+})
+
+const toRad = (deg: number) => (deg * Math.PI) / 180
+
+const sectorPolygon = (
+  center: [number, number],
+  azimuth: number,
+  beamwidth: number,
+  radiusMeters: number,
+  steps = 18
+): [number, number][] => {
+  const [lon, lat] = center
+  const points: [number, number][] = [[lon, lat]]
+  const start = azimuth - beamwidth / 2
+  const end = azimuth + beamwidth / 2
+  const step = (end - start) / steps
+
+  for (let angle = start; angle <= end; angle += step) {
+    const rad = toRad(angle)
+    const dLat = (radiusMeters / 111320) * Math.cos(rad)
+    const dLon = (radiusMeters / (111320 * Math.cos(toRad(lat)))) * Math.sin(rad)
+    points.push([lon + dLon, lat + dLat])
+  }
+  points.push([lon, lat])
+  return points
+}
+
+export const cellsToSectorsGeoJSON = (
+  cells: Cell[],
+  siteById: Map<string, Site>,
+  radiusMeters: number,
+  radiusByBand?: Record<string, number>,
+  getRadius?: (cell: Cell, bandRadius: number) => number
+): FeatureCollection<SectorFeature> => ({
+  type: 'FeatureCollection',
+  features: (cells
+    .map((cell) => {
+      const site = siteById.get(cell.siteId)
+      if (!site) return null
+      const azimuth = cell.azimuth ?? 0
+      const beam = cell.hBeamwidth ?? 65
+      const bandName = cell.band ?? 'Unknown'
+      const bandRadius = radiusByBand?.[bandName] ?? radiusMeters
+      const radius = getRadius ? getRadius(cell, bandRadius) : bandRadius
+      const polygon = sectorPolygon([site.lon, site.lat], azimuth, beam, radius)
+      return {
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [polygon],
+        },
+        properties: {
+          id: cell.id,
+          siteId: cell.siteId,
+          tech: cell.tech,
+          band: cell.band,
+          vendor: cell.vendor,
+        },
+      }
+    })
+    .filter(Boolean) as SectorFeature[]),
+})
+
+
+--- FILE: topology-explorer/src/components/MapView.tsx ---
+[COMPONENTE MUY GRANDE - Mapa interactivo con MapLibre]
+[Incluye: control de capas, gestión de interferencia, hotspots, zoom dinámico]
+
+
+--- FILE: topology-explorer/src/components/Sidebar.tsx ---
+[PANEL DE CONTROL CON FILTROS]
+[Incluye: tecnología, banda, región, búsqueda, presets, exportación]
+
+
+--- FILE: topology-explorer/src/components/SiteDrawer.tsx ---
+import type { Cell, Site } from '../types'
+
+type SiteDrawerProps = {
+  site: Site | null
+  cells: Cell[]
+  onClose: () => void
+}
+
+const SiteDrawer = ({ site, cells, onClose }: SiteDrawerProps) => {
+  if (!site) {
+    return <div className="drawer empty">Selecciona un sitio</div>
+  }
+
+  const countsByTech = cells.reduce<Record<string, number>>((acc, cell) => {
+    acc[cell.tech] = (acc[cell.tech] || 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <div className="drawer sheet">
+      <div className="sheet-handle" />
+      <div className="drawer-header">
+        <div>
+          <h3>{site.name}</h3>
+          <p className="muted">
+            {site.region ?? '-'} · {site.city ?? '-'}
+          </p>
+          <p className="muted">{site.id}</p>
+        </div>
+        <button className="ghost" onClick={onClose}>
+          Cerrar
+        </button>
+      </div>
+      <div className="sheet-metrics">
+        <div>
+          <span className="label">Cells Active</span>
+          <span>{cells.length}</span>
+        </div>
+        <div>
+          <span className="label">Interference</span>
+          <span>Low</span>
+        </div>
+        <div>
+          <span className="label">Techs</span>
+          <span>{Object.keys(countsByTech).join(' · ') || '-'}</span>
+        </div>
+        <div>
+          <span className="label">Lat / Lon</span>
+          <span>
+            {site.lat.toFixed(3)} / {site.lon.toFixed(3)}
+          </span>
+        </div>
+      </div>
+      <button className="primary wide">Open dashboard</button>
+    </div>
+  )
+}
+
+export default SiteDrawer
+
+
+--- FILE: topology-explorer/src/components/StatCard.tsx ---
+type StatCardProps = {
+  label: string
+  value: number
+}
+
+const StatCard = ({ label, value }: StatCardProps) => (
+  <div className="stat-card">
+    <span className="stat-label">{label}</span>
+    <strong className="stat-value">{value}</strong>
+  </div>
+)
+
+export default StatCard
+
+
+--- FILE: topology-explorer/src/sampleTopology.ts ---
+[DATOS DE EJEMPLO CON 10 SITIOS Y MUESTRAS DE INTERFERENCIA]
+[Madrid, Barcelona, Valencia, Sevilla, Zaragoza, Málaga, Murcia, Palma, Las Palmas, Bilbao]
+
+
+========================================================================================
+PARTE 3: README Y DOCUMENTACIÓN
+========================================================================================
+
+--- FILE: README.md ---
+# Interference Recommendation Engine
+
+Motor de recomendaciones basado en reglas (decision tree + scoring) para diagnostico de 
+interferencia UL/DL y plan de mitigacion.
+
+## Instalacion
+
+bash
+pip install -e .
+
+
+## CLI
+
+Ejecutar recomendaciones para multiples snapshots:
+
+bash
+interf-advisor run --input metrics.json --out out.json --rules rules.yaml
+
+
+Explicar un caso por celda y dia:
+
+bash
+interf-advisor explain --cell CELL_001 --day 2026-01-15 --input metrics.json --rules rules.yaml
+
+
+## Entrada JSON
+
+Puede ser una lista de snapshots o un objeto con snapshots:
+
+json
+[
+  {
+    "snapshot_day": "2026-01-15",
+    "cell_id": "CELL_001",
+    "site_id": "SITE_01",
+    "tech": "LTE",
+    "duplex": "FDD",
+    "ul_sinr_db_p50": -6.2,
+    "pusch_bler": 0.22,
+    "has_4rx": true,
+    "pim_class": "PIM_DISTRIBUIDO",
+    "pim_reliability": 0.7,
+    "pucch_bler_avg": 0.18,
+    "ampr_restriction_suspected": true,
+    "qci1_active_users": 5,
+    "qci1_kpi_degraded": true
+  }
+]
+
+
+## Features soportadas
+
+- PIM Detection / Avoidance
+- PIM suspected (validation workflow)
+- Atmospheric Duct Interference Reduction
+- IRC / 4x4 IRC / IRC AAS FDD
+- PUCCH Overdimensioning, Dynamic PUCCH, Flexible Uplink Processing
+- Uplink-Triggered IF Mobility
+- SPIFHO (Service or Priority Triggered IF HO)
+- Decoupled PDCCH LA
+- UL RLC Retx Threshold
+- IFLB / IFO / IVLB
+- Interference Sensing (NR)
+- Intelligent Power Emission Control
+- Instant Uplink Access
+
+
+========================================================================================
+RESUMEN TÉCNICO
+========================================================================================
+
+STACK TÉCNICO:
+- Backend: Python 3.11+ con Pydantic, Typer, PyYAML
+- Frontend: React 19 + TypeScript + Vite
+- Mapeo: MapLibre-GL 5.2
+- Pruebas: pytest
+
+CARACTERÍSTICAS PRINCIPALES:
+
+1. MOTOR DE ANÁLISIS (engine.py)
+   - 28+ categorías de interferencia
+   - Scoring dinámico de confianza
+   - Recomendaciones con acciones detalladas
+   - Validación de conflictos de configuración
+   - Trilatearación para localizar fuentes de interferencia
+
+2. VISUALIZACIÓN INTERACTIVA
+   - Mapa con sitios, células, enlaces
+   - Heatmaps de interferencia
+   - Detección automática de hotspots
+   - Presets de visualización (Suave/Medio/Intenso)
+   - Exportación de datos filtrados
+
+3. CONFIGURABILIDAD
+   - Umbrales ajustables via YAML
+   - Pesos de scoring configurables
+   - Switches de reglas (on/off)
+   - Persistencia de preferencias en localStorage
+
+ARCHIVOS CLAVE:
+- interference_advisor/engine.py (1500+ líneas) - Lógica principal
+- topology-explorer/src/App.tsx (800+ líneas) - Gestión de estado
+- topology-explorer/src/components/MapView.tsx (600+ líneas) - Mapa interactivo
+- rules.yaml - Configuración centralizada
+
+FLUJO DE DATOS:
+JSON Input → Validación → Engine (scoring) → Recommendations → Output JSON
+                             ↓
+                        Frontend (React)
+                             ↓
+                        Visualización M inInteractivo
+
+
+INSTALACIÓN Y USO:
+
+Backend:
+```
+cd interference_advisor
+pip install -e .
+interf-advisor run --input metrics.json --out out.json
+```
+
+Frontend:
+```
+cd topology-explorer
+npm install
+npm run dev  # http://localhost:5173
+```
+
+================================================================================
+FIN DEL CÓDIGO FUENTE COMPLETO
+================================================================================
