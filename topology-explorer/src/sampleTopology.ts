@@ -56,6 +56,58 @@ function slopedHistogram(baseLow: number, slopeDbPrb: number): number[][] {
   )
 }
 
+/** Narrow spike 1-3 PRBs, continuous 24/7 — FM Radio Harmonic */
+function fmHarmonicHistogram(centerPrb: number, peakLevel: number, widthPrb = 2): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array(24).fill(Math.abs(prb - centerPrb) <= widthPrb / 2 ? peakLevel : THERMAL)
+  )
+}
+
+/** Wideband moderate, slightly higher business hours — BDA Excess Gain */
+function bdaExcessGainHistogram(baseLevel: number): number[][] {
+  return Array.from({ length: N }, () =>
+    Array.from({ length: 24 }, (_, h) =>
+      h >= 8 && h < 20 ? baseLevel + 3.5 : baseLevel   // +3.5 dB during occupancy
+    )
+  )
+}
+
+/** Bottom PRBs elevated during business hours — WISP 2500 MHz */
+function wispHistogram(nLow: number, level: number): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array.from({ length: 24 }, (__, h) =>
+      prb < nLow && h >= 8 && h < 22 ? level : THERMAL
+    )
+  )
+}
+
+/** Broad wideband, slight daytime variation, moderate level — WiFi Camera 850 */
+function wifiCameraHistogram(level: number): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array.from({ length: 24 }, (__, h) => {
+      const broadness = 1 - Math.abs(prb - N / 2) / (N * 0.9)   // highest in center, tapers at edges
+      const timeVar = h >= 6 && h < 23 ? 1.0 : 0.55             // slightly lower at night
+      return level + 8 * broadness * timeVar - 8                  // range ~level-8 to level
+    })
+  )
+}
+
+/** Flat wideband severe, continuous — BDA Oscillation (already resolved in prev week) */
+function bdaOscillationHistogram(level: number): number[][] {
+  return Array.from({ length: N }, () => Array(24).fill(level))
+}
+
+/** Elevated but inconsistent pattern — Unknown Persistent */
+function unknownPersistentHistogram(baseLevel: number): number[][] {
+  // Pseudo-random but deterministic pattern to simulate unexplained interference
+  return Array.from({ length: N }, (_, prb) =>
+    Array.from({ length: 24 }, (__, h) => {
+      const seed = (prb * 31 + h * 7) % 17
+      return baseLevel + seed * 0.4   // irregular ±3 dB variation
+    })
+  )
+}
+
 const BUSINESS_TRAFFIC = [
   0.1, 0.1, 0.1, 0.1, 0.1, 0.2,
   0.4, 0.7, 0.9, 1.0, 1.0, 1.0,
@@ -63,6 +115,12 @@ const BUSINESS_TRAFFIC = [
   0.3, 0.2, 0.2, 0.1, 0.1, 0.1,
 ]
 const FLAT_TRAFFIC = Array(24).fill(0.5)
+const NIGHT_TRAFFIC = [
+  0.6, 0.8, 0.9, 0.9, 0.8, 0.6,
+  0.4, 0.3, 0.2, 0.2, 0.2, 0.2,
+  0.2, 0.2, 0.2, 0.3, 0.4, 0.5,
+  0.6, 0.6, 0.7, 0.7, 0.7, 0.6,
+]
 
 const sampleTopology: Topology = {
   version: '1.0',
@@ -146,6 +204,55 @@ const sampleTopology: Topology = {
       lon: -2.9350,
       region: 'País Vasco',
       city: 'Bilbao',
+    },
+    // --- Nuevos sitios con firmas de interferencia completas ---
+    {
+      id: 'S011',
+      name: 'SITE K - GRANADA RADIO',
+      lat: 37.1773,
+      lon: -3.5986,
+      region: 'Andalucía',
+      city: 'Granada',
+    },
+    {
+      id: 'S012',
+      name: 'SITE L - ALICANTE COSTA',
+      lat: 38.3452,
+      lon: -0.4815,
+      region: 'Valencia',
+      city: 'Alicante',
+    },
+    {
+      id: 'S013',
+      name: 'SITE M - SANTANDER INDUSTRIAL',
+      lat: 43.4623,
+      lon: -3.8099,
+      region: 'Cantabria',
+      city: 'Santander',
+    },
+    {
+      id: 'S014',
+      name: 'SITE N - CÓRDOBA POLÍGONO',
+      lat: 37.8882,
+      lon: -4.7794,
+      region: 'Andalucía',
+      city: 'Córdoba',
+    },
+    {
+      id: 'S015',
+      name: 'SITE O - VIGO PORTUARIO',
+      lat: 42.2328,
+      lon: -8.7226,
+      region: 'Galicia',
+      city: 'Vigo',
+    },
+    {
+      id: 'S016',
+      name: 'SITE P - HUELVA COSTA',
+      lat: 37.2614,
+      lon: -6.9447,
+      region: 'Andalucía',
+      city: 'Huelva',
     },
   ],
   cells: [
@@ -438,7 +545,7 @@ const sampleTopology: Topology = {
       trafficPerHour: FLAT_TRAFFIC,
       kpi: { rssi_avg_dbm: -98, ul_sinr_p50_db: -1.5, pusch_bler_avg: 0.09, ul_thp_mbps: 5.2 },
     },
-    // S010 - Bucaramanga Este
+    // S010 - Bilbao Este
     {
       id: 'C022',
       siteId: 'S010',
@@ -461,6 +568,366 @@ const sampleTopology: Topology = {
       pci: 245,
       azimuth: 120,
       tilt: 3,
+    },
+
+    // =========================================================================
+    // S011 - GRANADA RADIO — FM HARMONIC (B5/B17, 850 MHz)
+    // Estación FM 105.3 MHz, armónico 8vo: 842.4 MHz → PRB 8 de B5
+    // Mitigación: UL Spectrum Analyzer (FAJ 121 4271) + FSS (FAJ 121 4966)
+    // Delta: PREV sin FSS (harmónico al -76 dBm) → CURRENT con FSS (-76 dBm mismo
+    //        pero KPI mejorado; se ve en prev el impacto mayor en PRBs adyacentes)
+    // =========================================================================
+    {
+      id: 'C024',
+      siteId: 'S011',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 77,
+      azimuth: 45,
+      tilt: 3,
+      prbHistogram: fmHarmonicHistogram(8, -76.0, 2),
+      // PREV: harmónico más ancho (antes de confirmar PRB exacto con FAJ 4271)
+      prbHistogramPrev: fmHarmonicHistogram(8, -76.0, 5),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -100, ul_sinr_p50_db: -0.8, pusch_bler_avg: 0.06, ul_thp_mbps: 8.1, prb_util_ul: 0.38 },
+    },
+    {
+      id: 'C025',
+      siteId: 'S011',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 78,
+      azimuth: 165,
+      tilt: 2,
+      // Mismo sitio, sector diferente — FM harmónico menos visible por azimuth
+      prbHistogram: fmHarmonicHistogram(8, -84.0, 2),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -103, ul_sinr_p50_db: 0.5, pusch_bler_avg: 0.03, ul_thp_mbps: 10.2, prb_util_ul: 0.31 },
+    },
+    {
+      id: 'C026',
+      siteId: 'S011',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'HUAWEI',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 79,
+      azimuth: 285,
+      tilt: 2,
+    },
+
+    // =========================================================================
+    // S012 - ALICANTE COSTA — CABLE TV LEAKAGE (B28, 700 MHz)
+    // Red de cable TV antigua en área costera, TAPs oxidados
+    // Mitigación: IRC AAS (FAJ 121 4919) + UL-ITFM (FAJ 121 0484)
+    // Delta: PREV sin IRC → CURRENT con IRC activo (-5 dB mejora)
+    // =========================================================================
+    {
+      id: 'C027',
+      siteId: 'S012',
+      tech: 'LTE',
+      band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 700,
+      pci: 55,
+      azimuth: 10,
+      tilt: 3,
+      prbHistogram: flatHistogram(-93.0),
+      // PREV: sin IRC, interferencia cable TV 5 dB más severa
+      prbHistogramPrev: flatHistogram(-88.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -93, ul_sinr_p50_db: -2.1, pusch_bler_avg: 0.11, ul_thp_mbps: 4.8, prb_util_ul: 0.44 },
+    },
+    {
+      id: 'C028',
+      siteId: 'S012',
+      tech: 'LTE',
+      band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 700,
+      pci: 56,
+      azimuth: 130,
+      tilt: 2,
+      // Sector con menor exposición al cable TV
+      prbHistogram: flatHistogram(-101.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -101, ul_sinr_p50_db: 1.2, pusch_bler_avg: 0.02, ul_thp_mbps: 12.3, prb_util_ul: 0.29 },
+    },
+    {
+      id: 'C029',
+      siteId: 'S012',
+      tech: 'LTE',
+      band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 700,
+      pci: 57,
+      azimuth: 250,
+      tilt: 4,
+      prbHistogram: flatHistogram(-96.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -96, ul_sinr_p50_db: -1.5, pusch_bler_avg: 0.07, ul_thp_mbps: 6.9, prb_util_ul: 0.41 },
+    },
+
+    // =========================================================================
+    // S013 - SANTANDER INDUSTRIAL — WISP 2500 MHz (B41)
+    // Nodo WISP en azotea edificio industrial, TX en 2500–2515 MHz
+    // Mitigación: PUCCH Overdimensioning (FAJ 121 2204) + FSS (FAJ 121 4966) + Flex BW (FAJ 121 4756)
+    // Delta: PREV sin ninguna mitigación → CURRENT con PUCCH OD + FSS activos
+    // =========================================================================
+    {
+      id: 'C030',
+      siteId: 'S013',
+      tech: 'LTE',
+      band: 'B41',
+      bandNum: 41,
+      bwMhz: 20,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 2500,
+      pci: 112,
+      azimuth: 20,
+      tilt: 2,
+      prbHistogram: wispHistogram(12, -86.0),
+      // PREV: WISP sin ninguna mitigación — bottom PRBs +6 dB más severos
+      prbHistogramPrev: wispHistogram(12, -80.0),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -89, ul_sinr_p50_db: -2.8, pusch_bler_avg: 0.19, pucch_bler_avg: 0.22, ul_thp_mbps: 3.4, prb_util_ul: 0.56 },
+    },
+    {
+      id: 'C031',
+      siteId: 'S013',
+      tech: 'LTE',
+      band: 'B41',
+      bandNum: 41,
+      bwMhz: 20,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 2500,
+      pci: 113,
+      azimuth: 140,
+      tilt: 3,
+    },
+    {
+      id: 'C032',
+      siteId: 'S013',
+      tech: 'LTE',
+      band: 'B41',
+      bandNum: 41,
+      bwMhz: 20,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 2500,
+      pci: 114,
+      azimuth: 260,
+      tilt: 2,
+      // Sector con WISP moderado (no frente directo)
+      prbHistogram: wispHistogram(8, -91.0),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -92, ul_sinr_p50_db: -1.1, pusch_bler_avg: 0.08, ul_thp_mbps: 7.2, prb_util_ul: 0.49 },
+    },
+
+    // =========================================================================
+    // S014 - CÓRDOBA POLÍGONO — BDA EXCESS GAIN (B3) + BDA OSCILLATION (B5)
+    // BDA en edificio industrial: un sector en B3 con excess gain, otro en B5 oscilando
+    // Mitigación BDA EG: Field hunt + UL-ITFM (FAJ 121 0484)
+    // Mitigación BDA OSC: Regulatoria + UL-ITFM como temporal
+    // Delta OSC: PREV oscilando -74 dBm → CURRENT regulatoria aplicada (mejoró a -105 dBm)
+    // =========================================================================
+    {
+      id: 'C033',
+      siteId: 'S014',
+      tech: 'LTE',
+      band: 'B3',
+      bandNum: 3,
+      bwMhz: 15,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 1800,
+      pci: 143,
+      azimuth: 80,
+      tilt: 2,
+      prbHistogram: bdaExcessGainHistogram(-89.0),
+      // PREV: BDA excess gain sin acción de campo, nivel base idéntico
+      prbHistogramPrev: bdaExcessGainHistogram(-87.0),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -89, ul_sinr_p50_db: -3.5, pusch_bler_avg: 0.18, ul_thp_mbps: 2.9, prb_util_ul: 0.51 },
+    },
+    {
+      id: 'C034',
+      siteId: 'S014',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 144,
+      azimuth: 200,
+      tilt: 3,
+      // BDA Oscillation RESUELTO: acción regulatoria aplicada, celda recuperada
+      prbHistogram: flatHistogram(-105.0),
+      // PREV: oscilación activa, interferencia crítica
+      prbHistogramPrev: bdaOscillationHistogram(-74.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -105, ul_sinr_p50_db: 3.2, pusch_bler_avg: 0.01, ul_thp_mbps: 15.8, prb_util_ul: 0.22 },
+    },
+    {
+      id: 'C035',
+      siteId: 'S014',
+      tech: 'LTE',
+      band: 'B3',
+      bandNum: 3,
+      bwMhz: 15,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 1800,
+      pci: 145,
+      azimuth: 320,
+      tilt: 2,
+    },
+
+    // =========================================================================
+    // S015 - VIGO PORTUARIO — WIFI CAMERA 850 (B5, direccional)
+    // Cámaras IP ilegales en instalaciones portuarias transmitiendo en 840 MHz
+    // Direccional: sector AZ=30 afectado, sectores 150 y 270 casi limpios
+    // Mitigación: IRC AAS (FAJ 121 4919) + UL Spectrum Analyzer (FAJ 121 4271)
+    // Delta: PREV sin IRC → CURRENT con IRC (-4 dB mejora en sector afectado)
+    // =========================================================================
+    {
+      id: 'C036',
+      siteId: 'S015',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 167,
+      azimuth: 30,
+      tilt: 3,
+      // Sector apuntando hacia el puerto — nivel WiFi Camera más alto
+      prbHistogram: wifiCameraHistogram(-86.0),
+      // PREV: sin IRC AAS, interferencia 4 dB peor
+      prbHistogramPrev: wifiCameraHistogram(-82.0),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -86, ul_sinr_p50_db: -2.4, pusch_bler_avg: 0.14, ul_thp_mbps: 3.9, prb_util_ul: 0.48 },
+    },
+    {
+      id: 'C037',
+      siteId: 'S015',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 168,
+      azimuth: 150,
+      tilt: 2,
+      // Sector opuesto — nivel mucho más bajo, casi limpio
+      prbHistogram: wifiCameraHistogram(-98.0),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -98, ul_sinr_p50_db: 1.8, pusch_bler_avg: 0.02, ul_thp_mbps: 13.1, prb_util_ul: 0.33 },
+    },
+    {
+      id: 'C038',
+      siteId: 'S015',
+      tech: 'LTE',
+      band: 'B5',
+      bandNum: 5,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 850,
+      pci: 169,
+      azimuth: 270,
+      tilt: 2,
+    },
+
+    // =========================================================================
+    // S016 - HUELVA COSTA — UNKNOWN PERSISTENT (B3) + ATMOSPHERIC DUCTING (B28)
+    // Zona costera: B3 con interferencia sin firma clara; B28 con ducting nocturno
+    // Mitigación Unknown: Full field sweep + FAJ 121 4271 para diagnóstico
+    // Mitigación Ducting: FAJ 121 1752 Atmospheric Duct Interference Reduction
+    // Delta Ducting: PREV sin FAJ 1752 (noches críticas -82 dBm) → CURRENT con feature (-90 dBm)
+    // =========================================================================
+    {
+      id: 'C039',
+      siteId: 'S016',
+      tech: 'LTE',
+      band: 'B3',
+      bandNum: 3,
+      bwMhz: 20,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 1800,
+      pci: 201,
+      azimuth: 15,
+      tilt: 2,
+      prbHistogram: unknownPersistentHistogram(-100.0),
+      // PREV: patrón idéntico, interferencia sin identificar (sin mejora aún)
+      prbHistogramPrev: unknownPersistentHistogram(-99.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -100, ul_sinr_p50_db: -1.2, pusch_bler_avg: 0.07, ul_thp_mbps: 6.2, prb_util_ul: 0.40 },
+    },
+    {
+      id: 'C040',
+      siteId: 'S016',
+      tech: 'LTE',
+      band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 700,
+      pci: 202,
+      azimuth: 135,
+      tilt: 3,
+      // Ducting costal: episodios nocturnos severos (costa atlántica, inversión térmica)
+      prbHistogram: ductingHistogram(-90.0, -106.0),
+      // PREV: sin FAJ 121 1752 — ducting nocturno más severo
+      prbHistogramPrev: ductingHistogram(-82.0, -106.0),
+      trafficPerHour: NIGHT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -96, ul_sinr_p50_db: -1.8, pusch_bler_avg: 0.09, ul_thp_mbps: 5.5, prb_util_ul: 0.43 },
+    },
+    {
+      id: 'C041',
+      siteId: 'S016',
+      tech: 'LTE',
+      band: 'B3',
+      bandNum: 3,
+      bwMhz: 20,
+      vendor: 'ERICSSON',
+      hBeamwidth: 65,
+      earfcn: 1800,
+      pci: 203,
+      azimuth: 255,
+      tilt: 2,
     },
   ],
   links: [
