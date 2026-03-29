@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
+import CellAnalysisPanel from './components/CellAnalysisPanel'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
+import { analyzeCell } from './classify'
+import { buildSourceHeatmap } from './interference'
 import type { NormalizedTopology, Site, Tech } from './types'
 import type { InterferenceSample } from './types'
 
@@ -22,8 +25,8 @@ const PRESETS = {
 const MAP_STYLES = [
   {
     id: 'dark',
-    label: 'Dark (MapLibre)',
-    url: 'https://demotiles.maplibre.org/style.json',
+    label: 'Dark (Carto)',
+    url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
     backdrop: 'none',
   },
   {
@@ -32,7 +35,7 @@ const MAP_STYLES = [
     url: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
     backdrop: 'none',
   },
-  { id: 'blueprint', label: 'Blueprint', url: '/style.json', backdrop: 'blueprint' },
+  { id: 'blueprint', label: 'Blueprint (Offline)', url: '/style.json', backdrop: 'blueprint' },
 ] as const
 type PresetName = keyof typeof PRESETS | 'Custom'
 
@@ -120,6 +123,7 @@ function App() {
   >({})
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [mapStyleId, setMapStyleId] = useState<string>('blueprint')
+  const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
     TECH_OPTIONS.forEach((tech) => {
@@ -599,6 +603,10 @@ function App() {
     setSelectedSiteId(siteId)
   }, [])
 
+  const handleSelectCell = useCallback((cellId: string) => {
+    setSelectedCellId(cellId)
+  }, [])
+
   const handleUpload = async (file: File) => {
     setUploadError(null)
     const text = await file.text()
@@ -805,6 +813,51 @@ function App() {
     [interferenceIssues, topology.sites]
   )
 
+  // Cell analysis: run classifier when a cell with PRB data is clicked
+  const selectedCell = useMemo(
+    () => topology.cells.find(c => c.id === selectedCellId) ?? null,
+    [topology.cells, selectedCellId]
+  )
+
+  const allSitesForAnalysis = useMemo(() =>
+    topology.sites.map(s => ({
+      id: s.id,
+      lat: s.lat,
+      lon: s.lon,
+      cells: topology.cells.filter(c => c.siteId === s.id).map(c => c.id),
+    })),
+    [topology.sites, topology.cells]
+  )
+
+  const cellAnalysis = useMemo(() => {
+    if (!selectedCell?.prbHistogram || !selectedCell.bandNum) return null
+    const site = topology.sites.find(s => s.id === selectedCell.siteId)
+    if (!site) return null
+    return analyzeCell({
+      cellId: selectedCell.id,
+      bandNum: selectedCell.bandNum,
+      bwMhz: selectedCell.bwMhz ?? 10,
+      siteLat: site.lat,
+      siteLon: site.lon,
+      prbHistogram: selectedCell.prbHistogram,
+      trafficPerHour: selectedCell.trafficPerHour ?? Array(24).fill(0.5),
+      kpi: selectedCell.kpi,
+      allSites: allSitesForAnalysis,
+    })
+  }, [selectedCell, topology.sites, allSitesForAnalysis])
+
+  const sourceHeatmapGeoJSON = useMemo(() => {
+    if (!cellAnalysis || !selectedCell) return null
+    const site = topology.sites.find(s => s.id === selectedCell.siteId)
+    if (!site) return null
+    return buildSourceHeatmap(
+      site.lat,
+      site.lon,
+      cellAnalysis.sourceSearchRadiusKm,
+      cellAnalysis.matches[0]?.confidence ?? 0.5,
+    )
+  }, [cellAnalysis, selectedCell, topology.sites])
+
   const kpis = {
     sites: stats.sites,
     cells: stats.cells,
@@ -902,6 +955,7 @@ function App() {
           bands={availableBands}
           selectedSiteId={selectedSiteId}
           onSelectSite={handleSelectSite}
+          onSelectCell={handleSelectCell}
           showLinks={showLinks}
           zoomToSelectedSignal={zoomSignal}
           cells={displayCells}
@@ -914,6 +968,7 @@ function App() {
           styleUrl={currentMapStyle.url}
           backdrop={currentMapStyle.backdrop}
           hotspotAreas={hotspotAreas}
+          sourceHeatmapGeoJSON={sourceHeatmapGeoJSON}
         />
       </div>
 
@@ -1082,6 +1137,15 @@ function App() {
         cells={selectedCells}
         onClose={() => setSelectedSiteId(null)}
       />
+
+      {selectedCell && cellAnalysis && (
+        <CellAnalysisPanel
+          cell={selectedCell}
+          analysis={cellAnalysis}
+          allCells={topology.cells}
+          onClose={() => setSelectedCellId(null)}
+        />
+      )}
 
       <nav className="bottom-nav">
         <button className="nav-item active" onClick={() => console.log('Map clicked')}>

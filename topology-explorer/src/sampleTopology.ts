@@ -1,5 +1,69 @@
 import type { Topology } from './types'
 
+// ---------------------------------------------------------------------------
+// PRB histogram generators for sample data (50 PRBs × 24 hours)
+// ---------------------------------------------------------------------------
+const N = 50
+const THERMAL = -108.0
+
+/** Flat wideband — Cable TV / BDA oscillation signatures */
+function flatHistogram(level: number): number[][] {
+  return Array.from({ length: N }, () => Array(24).fill(level))
+}
+
+/** Business-hours narrowband — Jammer signature */
+function jammerHistogram(onLevel: number, centerPrb = 25, widthPrb = 7): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array.from({ length: 24 }, (__, h) =>
+      Math.abs(prb - centerPrb) <= widthPrb / 2 && h >= 7 && h < 19
+        ? onLevel
+        : THERMAL
+    )
+  )
+}
+
+/** Traffic-correlated mid-band — PIM signature */
+function pimHistogram(traffic: number[], startPrb = 18, endPrb = 38, amplitude = 12): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array.from({ length: 24 }, (__, h) =>
+      prb >= startPrb && prb < endPrb
+        ? THERMAL + amplitude * traffic[h]
+        : THERMAL
+    )
+  )
+}
+
+/** Bottom PRBs static — TV Digital 700 / WISP static */
+function bottomPrbHistogram(nLow: number, lowLevel: number): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array(24).fill(prb < nLow ? lowLevel : THERMAL)
+  )
+}
+
+/** Night-heavy wideband — Atmospheric ducting */
+function ductingHistogram(nightLevel: number, dayLevel: number): number[][] {
+  return Array.from({ length: N }, () =>
+    Array.from({ length: 24 }, (_, h) =>
+      h >= 21 || h < 6 ? nightLevel : dayLevel
+    )
+  )
+}
+
+/** Ascending slope — Military/police */
+function slopedHistogram(baseLow: number, slopeDbPrb: number): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array(24).fill(baseLow + prb * slopeDbPrb)
+  )
+}
+
+const BUSINESS_TRAFFIC = [
+  0.1, 0.1, 0.1, 0.1, 0.1, 0.2,
+  0.4, 0.7, 0.9, 1.0, 1.0, 1.0,
+  1.0, 0.9, 0.9, 0.8, 0.7, 0.5,
+  0.3, 0.2, 0.2, 0.1, 0.1, 0.1,
+]
+const FLAT_TRAFFIC = Array(24).fill(0.5)
+
 const sampleTopology: Topology = {
   version: '1.0',
   sites: [
@@ -91,12 +155,17 @@ const sampleTopology: Topology = {
       siteId: 'S001',
       tech: 'LTE',
       band: 'B3',
+      bandNum: 3,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 1800,
       pci: 10,
       azimuth: 0,
       tilt: 2,
+      prbHistogram: flatHistogram(-95.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -95, ul_sinr_p50_db: -2.5, pusch_bler_avg: 0.12, ul_thp_mbps: 4.2, prb_util_ul: 0.45 },
     },
     {
       id: 'C002',
@@ -127,12 +196,17 @@ const sampleTopology: Topology = {
       siteId: 'S002',
       tech: 'LTE',
       band: 'B7',
+      bandNum: 7,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 2600,
       pci: 34,
       azimuth: 0,
       tilt: 2,
+      prbHistogram: jammerHistogram(-74.0, 25, 7),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -88, ul_sinr_p50_db: -4.1, pusch_bler_avg: 0.22, pucch_bler_avg: 0.18, ul_thp_mbps: 2.1, prb_util_ul: 0.52 },
     },
     {
       id: 'C005',
@@ -173,12 +247,17 @@ const sampleTopology: Topology = {
       siteId: 'S003',
       tech: 'LTE',
       band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 700,
       pci: 44,
       azimuth: 120,
       tilt: 2,
+      prbHistogram: bottomPrbHistogram(10, -91.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -92, ul_sinr_p50_db: -3.2, pusch_bler_avg: 0.15, ul_thp_mbps: 3.1, prb_util_ul: 0.48 },
     },
     {
       id: 'C009',
@@ -208,12 +287,17 @@ const sampleTopology: Topology = {
       siteId: 'S004',
       tech: 'LTE',
       band: 'B3',
+      bandNum: 3,
+      bwMhz: 20,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 1800,
       pci: 18,
       azimuth: 120,
       tilt: 2,
+      prbHistogram: pimHistogram(BUSINESS_TRAFFIC, 18, 38, 12),
+      trafficPerHour: BUSINESS_TRAFFIC,
+      kpi: { rssi_avg_dbm: -97, ul_sinr_p50_db: -1.8, pusch_bler_avg: 0.10, ul_thp_mbps: 5.8, prb_util_ul: 0.60 },
     },
     // S005 - Bogota Norte
     {
@@ -256,12 +340,17 @@ const sampleTopology: Topology = {
       siteId: 'S006',
       tech: 'LTE',
       band: 'B7',
+      bandNum: 7,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 2600,
       pci: 78,
       azimuth: 120,
       tilt: 2,
+      prbHistogram: ductingHistogram(-84.0, -105.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -90, ul_sinr_p50_db: -2.0, pusch_bler_avg: 0.08, ul_thp_mbps: 6.5 },
     },
     // S007 - Cartagena Sur
     {
@@ -280,12 +369,17 @@ const sampleTopology: Topology = {
       siteId: 'S007',
       tech: 'LTE',
       band: 'B28',
+      bandNum: 28,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 700,
       pci: 92,
       azimuth: 120,
       tilt: 2,
+      prbHistogram: flatHistogram(-72.0),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -72, ul_sinr_p50_db: -8.5, pusch_bler_avg: 0.42, pucch_bler_avg: 0.38, ul_thp_mbps: 0.4, prb_util_ul: 0.25 },
     },
     // S008 - Pereira Oeste
     {
@@ -328,12 +422,17 @@ const sampleTopology: Topology = {
       siteId: 'S009',
       tech: 'LTE',
       band: 'B7',
+      bandNum: 7,
+      bwMhz: 10,
       vendor: 'ERICSSON',
       hBeamwidth: 65,
       earfcn: 2600,
       pci: 167,
       azimuth: 120,
       tilt: 2,
+      prbHistogram: slopedHistogram(-108.0, 0.20),
+      trafficPerHour: FLAT_TRAFFIC,
+      kpi: { rssi_avg_dbm: -98, ul_sinr_p50_db: -1.5, pusch_bler_avg: 0.09, ul_thp_mbps: 5.2 },
     },
     // S010 - Bucaramanga Este
     {

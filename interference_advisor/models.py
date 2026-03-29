@@ -4,6 +4,11 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+# ---------------------------------------------------------------------------
+# Type alias for PRB interference histogram: List[prb][hour] in dBm
+# ---------------------------------------------------------------------------
+PrbHistogram = List[List[float]]
+
 
 class NeighborRelation(BaseModel):
     neighbor_cell_id: str
@@ -146,6 +151,61 @@ class CellSnapshot(BaseModel):
     emf_power_cap_flag: Optional[bool] = None
     ul_latency_sensitive: Optional[bool] = None
     spectrogram: Optional[Spectrogram] = None
+
+
+# ---------------------------------------------------------------------------
+# PRB Source Signature Classifier models
+# ---------------------------------------------------------------------------
+
+class PRBSignatureFeatures(BaseModel):
+    """Derived features extracted from a PRB interference histogram."""
+
+    # Severity
+    peak_dbm: float
+    floor_elevation_db: float       # median PRB level minus thermal floor (−108 dBm)
+
+    # Frequency-domain shape
+    prb_uniformity: float           # 1.0 = all PRBs equal (wideband flat)
+    edge_prb_excess_db: float       # mean(edge 15%) − mean(center 70%) in dB
+    low_prb_excess_db: float        # mean(bottom 25% PRBs) − mean(all PRBs) in dB
+    peak_cluster_width_pct: float   # width of dominant peak / N_PRB × 100
+    slope_db_per_prb: float         # linear regression slope across PRBs (+ = ascending)
+    bimodal_edge_excess_db: float   # mean(both 15% edges) − mean(center 70%) in dB
+
+    # Temporal features (computed on hot-zone PRBs — top 20% by average level)
+    temporal_cv: float              # coefficient of variation of hot-zone hourly avg
+    business_hour_excess_db: float  # mean(7–18 h) − mean(off-hours) of hot zone in dB
+    traffic_correlation: float      # Pearson r with traffic_per_hour
+    night_minus_day_db: float       # mean(0–6 h) − mean(9–18 h) of hot zone in dB
+
+    # Context
+    n_prb: int
+    cell_band: int
+    cell_bw_mhz: float
+
+
+class SourceSignatureMatch(BaseModel):
+    """A matched interference source type with confidence and evidence."""
+
+    source_type: str                # e.g. "CABLE_TV_LEAKAGE"
+    label: str                      # human-readable label
+    confidence: float               # 0.0–1.0
+    evidence: List[str]             # which features triggered this match
+    severity: str                   # LOW / MEDIUM / HIGH / CRITICAL
+    action_hint: str                # recommended first field/network action
+    band_consistent: bool           # source type is plausible for this band
+
+
+class PRBClassificationResult(BaseModel):
+    """Full classification result for one cell."""
+
+    cell_id: str
+    band: int
+    bw_mhz: float
+    features: PRBSignatureFeatures
+    matches: List[SourceSignatureMatch]   # ranked by confidence, descending
+    primary_source: str                   # source_type of top match
+    requires_field: bool                  # True when field investigation is advised
 
 
 class ConfigChange(BaseModel):

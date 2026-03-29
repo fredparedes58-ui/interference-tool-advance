@@ -5,6 +5,15 @@ import { buildInterferenceGrid } from '../interference'
 import type { Cell, InterferenceSample, Link, Site } from '../types'
 import type { Expression } from 'maplibre-gl'
 
+type SourceHeatmapGeoJSON = {
+  type: 'FeatureCollection'
+  features: Array<{
+    type: 'Feature'
+    geometry: { type: 'Point'; coordinates: [number, number] }
+    properties: { weight: number }
+  }>
+} | null
+
 type MapViewProps = {
   sites: Site[]
   links: Link[]
@@ -28,7 +37,9 @@ type MapViewProps = {
   styleUrl: string
   backdrop: string
   onSelectSite: (siteId: string) => void
+  onSelectCell?: (cellId: string) => void
   zoomToSelectedSignal: number
+  sourceHeatmapGeoJSON?: SourceHeatmapGeoJSON
 }
 
 const REMOTE_STYLE = 'https://demotiles.maplibre.org/style.json'
@@ -69,7 +80,9 @@ const MapView = ({
   styleUrl,
   backdrop,
   onSelectSite,
+  onSelectCell,
   zoomToSelectedSignal,
+  sourceHeatmapGeoJSON,
 }: MapViewProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -180,7 +193,16 @@ const MapView = ({
       if (styleFallbackUsed) return
       setStyleFallbackUsed(true)
       setStyleUrlState(FALLBACK_STYLE)
-    }, 3500)
+    }, 5000)
+
+    let fallbackTriggered = false
+    const triggerFallback = () => {
+      if (fallbackTriggered || styleFallbackUsed) return
+      fallbackTriggered = true
+      window.clearTimeout(fallbackTimer)
+      setStyleFallbackUsed(true)
+      setStyleUrlState(FALLBACK_STYLE)
+    }
 
     map.on('load', () => {
       window.clearTimeout(fallbackTimer)
@@ -217,6 +239,42 @@ const MapView = ({
               details: item.details,
             },
           })),
+        },
+      })
+
+      map.addSource('source-heatmap', {
+        type: 'geojson',
+        data: sourceHeatmapGeoJSON ?? { type: 'FeatureCollection', features: [] },
+      })
+
+      map.addLayer({
+        id: 'source-heatmap-layer',
+        type: 'heatmap',
+        source: 'source-heatmap',
+        paint: {
+          'heatmap-weight': ['get', 'weight'],
+          'heatmap-intensity': [
+            'interpolate', ['linear'], ['zoom'],
+            4, 1.0,
+            10, 2.5,
+            14, 4.0,
+          ],
+          'heatmap-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            4, 30,
+            10, 50,
+            14, 80,
+          ],
+          'heatmap-opacity': 0.80,
+          'heatmap-color': [
+            'interpolate', ['linear'], ['heatmap-density'],
+            0,   'rgba(255, 255, 0, 0)',
+            0.2, 'rgba(255, 220, 0, 0.3)',
+            0.4, 'rgba(255, 150, 0, 0.55)',
+            0.6, 'rgba(255, 80, 0, 0.72)',
+            0.8, 'rgba(220, 20, 20, 0.85)',
+            1.0, 'rgba(180, 0, 100, 0.95)',
+          ],
         },
       })
 
@@ -424,8 +482,11 @@ const MapView = ({
 
       map.on('click', 'cells-sector', (event) => {
         const feature = event.features?.[0]
+        const cellId = feature?.properties?.id   // geojson.ts uses 'id' for cell.id
         const siteId = feature?.properties?.siteId
-        if (typeof siteId === 'string') {
+        if (typeof cellId === 'string' && onSelectCell) {
+          onSelectCell(cellId)
+        } else if (typeof siteId === 'string') {
           onSelectSite(siteId)
         }
       })
@@ -479,8 +540,20 @@ const MapView = ({
       updateViewMetrics()
     })
 
+    const loggedErrors = new Set<string>()
     map.on('error', (e) => {
-      console.error('MapView: Map error:', e)
+      const msg = (e as any)?.error?.message ?? (e as any)?.message ?? 'unknown'
+      const status = (e as any)?.status
+      // Silence repeated tile 404/network errors after first occurrence
+      const key = `${msg}:${status ?? ''}`
+      if (!loggedErrors.has(key)) {
+        loggedErrors.add(key)
+        console.warn('MapView style/tile error:', msg, status ? `(HTTP ${status})` : '')
+      }
+      // If this is a style-load failure (not a mid-session tile error), switch to offline fallback
+      if (!map.isStyleLoaded() && styleUrlState !== FALLBACK_STYLE) {
+        triggerFallback()
+      }
     })
 
     return () => {
@@ -547,6 +620,15 @@ const MapView = ({
       })
     }
   }, [hotspotAreas])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const source = map.getSource('source-heatmap') as maplibregl.GeoJSONSource | undefined
+    if (source) {
+      source.setData(sourceHeatmapGeoJSON ?? { type: 'FeatureCollection', features: [] })
+    }
+  }, [sourceHeatmapGeoJSON])
 
   useEffect(() => {
     const map = mapRef.current

@@ -1,5 +1,60 @@
 import type { Cell, InterferenceSample, Site } from './types'
 
+// ---------------------------------------------------------------------------
+// Source location probability heatmap
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a GeoJSON heatmap centred on (lat, lon) within searchRadiusKm.
+ * Weights decay from 1 at the centre to 0 at the radius using Gaussian falloff,
+ * representing the probability density of the interference source location.
+ */
+export function buildSourceHeatmap(
+  lat: number,
+  lon: number,
+  searchRadiusKm: number,
+  confidence: number,
+): FeatureCollection {
+  if (searchRadiusKm <= 0) return { type: 'FeatureCollection', features: [] }
+
+  // Approx degrees per km
+  const degPerKmLat = 1 / 110.57
+  const degPerKmLon = 1 / (111.32 * Math.cos(lat * (Math.PI / 180)))
+
+  const radiusDegLat = searchRadiusKm * degPerKmLat
+  const radiusDegLon = searchRadiusKm * degPerKmLon
+
+  // Grid step: finer for small radii (BDA = 0.4 km), coarser for large (ducting = 50 km)
+  const gridPoints = 28
+  const stepLat = (2 * radiusDegLat) / gridPoints
+  const stepLon = (2 * radiusDegLon) / gridPoints
+
+  const features: PointFeature[] = []
+  const sigma = 0.4 // fraction of radius at 1σ
+
+  for (let i = 0; i <= gridPoints; i++) {
+    for (let j = 0; j <= gridPoints; j++) {
+      const pLat = lat - radiusDegLat + i * stepLat
+      const pLon = lon - radiusDegLon + j * stepLon
+
+      // Normalised distance from centre [0, 1]
+      const dLat = (pLat - lat) / radiusDegLat
+      const dLon = (pLon - lon) / radiusDegLon
+      const r2 = dLat * dLat + dLon * dLon
+      if (r2 > 1) continue // outside radius
+
+      const weight = confidence * Math.exp(-r2 / (2 * sigma * sigma))
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [pLon, pLat] },
+        properties: { weight },
+      })
+    }
+  }
+
+  return { type: 'FeatureCollection', features }
+}
+
 type PointFeature = {
   type: 'Feature'
   geometry: { type: 'Point'; coordinates: [number, number] }

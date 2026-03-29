@@ -58,6 +58,13 @@ export default defineConfig({
       },
     }),
   ],
+  css: {
+    // Inline PostCSS config to prevent Vite from picking up the global
+    // C:\Users\pparedes\postcss.config.js which requires tailwindcss
+    postcss: {
+      plugins: [],
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: parseInt(process.env.PORT || '5173'),
