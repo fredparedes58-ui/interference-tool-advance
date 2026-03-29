@@ -205,6 +205,8 @@ const sampleTopology: Topology = {
       azimuth: 0,
       tilt: 2,
       prbHistogram: jammerHistogram(-74.0, 25, 7),
+      // Semana anterior: jammer igual de fuerte, sin mejora aún
+      prbHistogramPrev: jammerHistogram(-73.5, 25, 7),
       trafficPerHour: FLAT_TRAFFIC,
       kpi: { rssi_avg_dbm: -88, ul_sinr_p50_db: -4.1, pusch_bler_avg: 0.22, pucch_bler_avg: 0.18, ul_thp_mbps: 2.1, prb_util_ul: 0.52 },
     },
@@ -296,6 +298,8 @@ const sampleTopology: Topology = {
       azimuth: 120,
       tilt: 2,
       prbHistogram: pimHistogram(BUSINESS_TRAFFIC, 18, 38, 12),
+      // Semana anterior: PIM más severo (antes de aplicar PIM Avoidance FAJ 121 5448)
+      prbHistogramPrev: pimHistogram(BUSINESS_TRAFFIC, 18, 38, 18),
       trafficPerHour: BUSINESS_TRAFFIC,
       kpi: { rssi_avg_dbm: -97, ul_sinr_p50_db: -1.8, pusch_bler_avg: 0.10, ul_thp_mbps: 5.8, prb_util_ul: 0.60 },
     },

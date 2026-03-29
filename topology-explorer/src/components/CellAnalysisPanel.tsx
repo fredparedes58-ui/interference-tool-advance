@@ -77,15 +77,97 @@ function dbmToColour(dbm: number): string {
   return `rgb(${Math.round(255 - tt * 30)},${Math.round(60 - tt * 55)},${Math.round(10)})`
 }
 
+// ---- Delta colour (week-over-week comparison) ------------------------------
+// Blue = improved (less interference), Red = worse, White = unchanged
+
+function deltaToColour(delta: number): string {
+  if (Math.abs(delta) < 0.5) return 'rgb(30,41,59)'  // near-zero: dark neutral
+  const clamped = Math.max(-12, Math.min(12, delta))
+  if (clamped < 0) {
+    // Improved: delta negative → blue
+    const t = Math.min(1, -clamped / 12)
+    return `rgb(${Math.round(20 - t * 10)},${Math.round(40 + t * 130)},${Math.round(80 + t * 175)})`
+  }
+  // Worsened: delta positive → red/orange
+  const t = Math.min(1, clamped / 12)
+  return `rgb(${Math.round(100 + t * 155)},${Math.round(60 - t * 55)},${Math.round(20 - t * 15)})`
+}
+
 // ---- PRB Heatmap -----------------------------------------------------------
 
-function PrbHeatmap({ histogram }: { histogram: number[][] }) {
+type HeatmapMode = 'current' | 'prev' | 'delta'
+
+function PrbHeatmap({
+  histogram,
+  histogramPrev,
+}: {
+  histogram: number[][]
+  histogramPrev?: number[][]
+}) {
+  const [mode, setMode] = useState<HeatmapMode>('current')
   const N = histogram.length
   const CELL_W = Math.max(2, Math.floor(360 / 24))
   const CELL_H = Math.max(2, Math.floor(200 / N))
 
+  const hasPrev = histogramPrev && histogramPrev.length === N
+
+  // Compute delta matrix (current - prev): positive = worsened
+  const deltaMatrix = useMemo(() => {
+    if (!hasPrev) return null
+    return histogram.map((row, prb) =>
+      row.map((dbm, h) => dbm - histogramPrev![prb][h])
+    )
+  }, [histogram, histogramPrev, hasPrev])
+
+  const activeMatrix = mode === 'delta' && deltaMatrix
+    ? deltaMatrix
+    : mode === 'prev' && histogramPrev
+      ? histogramPrev
+      : histogram
+
+  const getCellColour = (val: number): string => {
+    if (mode === 'delta') return deltaToColour(val)
+    return dbmToColour(val)
+  }
+
+  // Average delta for summary badge
+  const avgDelta = useMemo(() => {
+    if (!deltaMatrix) return 0
+    let sum = 0; let count = 0
+    for (const row of deltaMatrix) for (const v of row) { sum += v; count++ }
+    return count > 0 ? sum / count : 0
+  }, [deltaMatrix])
+
   return (
     <div className="prb-heatmap-wrap">
+      {/* Mode selector */}
+      {hasPrev && (
+        <div className="prb-week-tabs">
+          <button
+            className={`prb-week-tab ${mode === 'current' ? 'prb-week-tab--active' : ''}`}
+            onClick={() => setMode('current')}
+          >Semana actual</button>
+          <button
+            className={`prb-week-tab ${mode === 'prev' ? 'prb-week-tab--active' : ''}`}
+            onClick={() => setMode('prev')}
+          >Semana anterior</button>
+          <button
+            className={`prb-week-tab ${mode === 'delta' ? 'prb-week-tab--active' : ''}`}
+            onClick={() => setMode('delta')}
+          >
+            Delta Δ
+            {mode === 'delta' && (
+              <span
+                className="prb-delta-badge"
+                style={{ color: avgDelta > 0 ? '#ef4444' : '#38bdf8' }}
+              >
+                {avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1)} dB
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       <div className="prb-heatmap-labels-top">
         {Array.from({ length: 24 }, (_, h) => (
           <span key={h} style={{ width: CELL_W }}>{h % 6 === 0 ? `${h}h` : ''}</span>
@@ -106,16 +188,18 @@ function PrbHeatmap({ histogram }: { histogram: number[][] }) {
             gap: 0,
           }}
         >
-          {/* Render from high PRB to low PRB (top = high freq) */}
           {Array.from({ length: N }, (_, rowRev) => {
             const prb = N - 1 - rowRev
             return Array.from({ length: 24 }, (_, h) => {
-              const dbm = histogram[prb][h]
+              const val = activeMatrix[prb][h]
+              const label = mode === 'delta'
+                ? `PRB ${prb}, h${h}: Δ${val >= 0 ? '+' : ''}${val.toFixed(1)} dB`
+                : `PRB ${prb}, h${h}: ${val.toFixed(1)} dBm`
               return (
                 <div
                   key={`${prb}-${h}`}
-                  style={{ background: dbmToColour(dbm) }}
-                  title={`PRB ${prb}, h${h}: ${dbm.toFixed(1)} dBm`}
+                  style={{ background: getCellColour(val) }}
+                  title={label}
                 />
               )
             })
@@ -123,11 +207,24 @@ function PrbHeatmap({ histogram }: { histogram: number[][] }) {
         </div>
       </div>
       <div className="prb-heatmap-legend">
-        <div className="prb-heatmap-gradient" />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b', marginTop: 2 }}>
-          <span>−108 dBm (thermal)</span>
-          <span>−72 dBm (severe)</span>
-        </div>
+        {mode === 'delta' ? (
+          <>
+            <div className="prb-heatmap-gradient prb-heatmap-gradient--delta" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b', marginTop: 2 }}>
+              <span style={{ color: '#38bdf8' }}>−12 dB (mejoró)</span>
+              <span>sin cambio</span>
+              <span style={{ color: '#ef4444' }}>+12 dB (empeoró)</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="prb-heatmap-gradient" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b', marginTop: 2 }}>
+              <span>−108 dBm (thermal)</span>
+              <span>−72 dBm (severe)</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -360,8 +457,18 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }:
         {/* PRB histogram heatmap */}
         {hasHistogram && (
           <div className="cap-section">
-            <div className="cap-section-title">PRB Interference Histogram (24h)</div>
-            <PrbHeatmap histogram={cell.prbHistogram!} />
+            <div className="cap-section-title">
+              PRB Interference Histogram (24h)
+              {cell.prbHistogramPrev && (
+                <span style={{ fontSize: '0.72rem', color: '#64748b', marginLeft: 8 }}>
+                  · comparación semana disponible
+                </span>
+              )}
+            </div>
+            <PrbHeatmap
+              histogram={cell.prbHistogram!}
+              histogramPrev={cell.prbHistogramPrev}
+            />
           </div>
         )}
 

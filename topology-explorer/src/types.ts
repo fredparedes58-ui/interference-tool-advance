@@ -24,6 +24,8 @@ export type Cell = {
   tilt?: number
   /** PRB interference histogram [N_PRB][24] in dBm — used for source classification */
   prbHistogram?: number[][]
+  /** Previous week PRB histogram [N_PRB][24] in dBm — for week-over-week comparison */
+  prbHistogramPrev?: number[][]
   /** Hourly traffic profile [24] normalised 0–1 */
   trafficPerHour?: number[]
   /** KPI snapshot */
