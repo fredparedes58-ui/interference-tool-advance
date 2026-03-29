@@ -29,7 +29,8 @@ const FALLBACK_CONFIDENCE = 0.40
 // ---------------------------------------------------------------------------
 const BAND_COMPAT: Record<SourceType, number[]> = {
   CABLE_TV_LEAKAGE:           [28, 5, 17, 20, 12, 13, 14],
-  FM_RADIO_HARMONIC:          [5, 17, 20, 12, 13, 14],
+  // B28 added: 7th harmonic of 101.7 MHz FM = 711.9 MHz falls inside B28 UL (703–748 MHz)
+  FM_RADIO_HARMONIC:          [5, 17, 20, 12, 13, 14, 28],
   TV_DIGITAL_BROADCAST_700:   [28],
   BDA_OSCILLATION:            [],
   BDA_EXCESS_GAIN:            [],
@@ -59,7 +60,7 @@ const LABELS: Record<SourceType, string> = {
 
 const ACTION_HINTS: Record<SourceType, string> = {
   CABLE_TV_LEAKAGE:           'Field sweep near cable TV poles; coordinate with cable operator',
-  FM_RADIO_HARMONIC:          'Identify FM station; compute harmonic; notify regulator',
+  FM_RADIO_HARMONIC:          'Compute FM harmonics: N × FM_freq → check if result falls in UL band. Activate FAJ 121 4271 to confirm exact PRB. Notify regulator.',
   TV_DIGITAL_BROADCAST_700:   'Confirm TV channel overlap; coordinate with spectrum regulator',
   BDA_OSCILLATION:            'Direction-find source; locate BDA; deactivate; file complaint',
   BDA_EXCESS_GAIN:            'Field sweep in sector direction; identify building with BDA',
@@ -74,7 +75,7 @@ const ACTION_HINTS: Record<SourceType, string> = {
 
 const SEVERITY_MAP: Record<SourceType, SourceMatch['severity']> = {
   CABLE_TV_LEAKAGE:           'MEDIUM',
-  FM_RADIO_HARMONIC:          'LOW',
+  FM_RADIO_HARMONIC:          'MEDIUM',  // peak can reach -70 dBm (VALX1509Y2A), impacting ~60% of UL PRBs
   TV_DIGITAL_BROADCAST_700:   'HIGH',
   BDA_OSCILLATION:            'CRITICAL',
   BDA_EXCESS_GAIN:            'HIGH',
@@ -101,6 +102,64 @@ export const SOURCE_SEARCH_RADIUS_KM: Record<SourceType, number> = {
   PIM:                        0.05, // on-site
   ATMOSPHERIC_DUCTING:       50.0,
   UNKNOWN_PERSISTENT:         1.0,
+}
+
+// ---------------------------------------------------------------------------
+// FM Harmonic Calculation Utility
+// ---------------------------------------------------------------------------
+
+/**
+ * LTE UL band frequency ranges (MHz).
+ * Used to calculate which harmonic order of a given FM station frequency falls
+ * within the uplink receive band, per methodology documented in field reports.
+ *
+ * Reference examples:
+ *   FM 103.3 MHz × 8 = 826.4 MHz  →  falls in B5 UL (824–849 MHz)
+ *   FM 101.7 MHz × 7 = 711.9 MHz  →  falls in B28 UL (703–748 MHz)
+ */
+export const UL_BAND_RANGES_MHZ: Record<number, [number, number]> = {
+  5:  [824.0, 849.0],   // 850 MHz
+  17: [814.0, 849.0],   // AWS-850 (US/LATAM)
+  28: [703.0, 748.0],   // 700 APT (LATAM, APAC)
+  20: [832.0, 862.0],   // 800 DD (Europe)
+  3:  [1710.0, 1785.0], // 1800 MHz
+  1:  [1920.0, 1980.0], // 2100 MHz
+  7:  [2500.0, 2570.0], // 2600 MHz
+  41: [2496.0, 2690.0], // 2500 TDD
+}
+
+/**
+ * For a given FM station frequency, find all harmonic orders (2–12) whose
+ * frequency falls within the UL band of the specified LTE band number.
+ *
+ * Returns an array of matches sorted by harmonic order, each including:
+ *   - order: harmonic order N
+ *   - freqMhz: N × FM_freq (MHz)
+ *   - posPct: position within the UL band (0 = low edge, 100 = high edge)
+ *   - affectedPrbsApprox: estimated number of affected PRBs in a 10 MHz channel
+ *     (based on field evidence: harmonic front-end blocking spans ~6 MHz regardless
+ *     of the actual RF signal BW of ≤1.5 MHz)
+ */
+export function calcFmHarmonicsInBand(
+  fmFreqMhz: number,
+  bandNum: number,
+): Array<{ order: number; freqMhz: number; posPct: number; affectedPrbsApprox: number }> {
+  const range = UL_BAND_RANGES_MHZ[bandNum]
+  if (!range) return []
+  const [lo, hi] = range
+  const bandWidthMhz = hi - lo
+  const results: Array<{ order: number; freqMhz: number; posPct: number; affectedPrbsApprox: number }> = []
+  for (let n = 2; n <= 12; n++) {
+    const f = fmFreqMhz * n
+    if (f >= lo && f <= hi) {
+      const posPct = ((f - lo) / bandWidthMhz) * 100
+      // Empirical: front-end blocking from harmonic covers ~6 MHz in 10 MHz channel
+      // mapped proportionally to the channel bandwidth
+      const affectedPrbsApprox = Math.round((6.3 / 10) * 50)   // ~31 PRBs for 10 MHz
+      results.push({ order: n, freqMhz: parseFloat(f.toFixed(2)), posPct, affectedPrbsApprox })
+    }
+  }
+  return results
 }
 
 // ---------------------------------------------------------------------------
@@ -259,17 +318,62 @@ const scoreCableTv: Scorer = f => {
   return [weightedMean(c), ev]
 }
 
+/**
+ * FM Radio Harmonic scorer — updated from field evidence (VALX1509Y2A / BALX0407M1A).
+ *
+ * Key insight: FM harmonic desensitises ~60% of PRBs in a 10 MHz channel (6.3 MHz
+ * front-end blocking span) even though the RF spike is ≤1.5 MHz.  The primary
+ * discriminators are therefore:
+ *   1. Partial-band low-PRB or bilateral-edge elevation (lowPrbExcessDb / edgePrbExcessDb)
+ *   2. Continuous 24/7 (temporalCv ≈ 0) — broadcast station never turns off
+ *   3. No traffic correlation — meteorological / external, not PIM
+ *
+ * The old narrow-spike criterion (peakClusterWidthPct < 5%) was wrong — kept only as
+ * a small bonus for rare ultra-close FM stations.
+ */
 const scoreFmHarmonic: Scorer = f => {
   const ev: string[] = []
   const c: [number, number][] = []
-  let s = invSig(f.peakClusterWidthPct, 5.5)
-  c.push([s, 5]); if (s > 0.5) ev.push(`peak_width=${f.peakClusterWidthPct.toFixed(1)}% (very narrow)`)
-  s = sigmoid(f.prbUniformity, 0.65)
-  c.push([s, 2])
-  s = invSig(f.temporalCv, 0.12)
-  c.push([s, 2.5]); if (s > 0.5) ev.push(`temporal_cv=${f.temporalCv.toFixed(2)} (continuous)`)
+
+  // PRIMARY: partial-band concentration (low-PRB OR bilateral-edge).
+  // Low-PRB (VALX1509Y2A): harmonic at the low end of the UL band → lowPrbExcessDb high.
+  // Edge bilateral (BALX0407M1A): two harmonics at both ends → edgePrbExcessDb high.
+  const lowBandScore  = sigmoid(f.lowPrbExcessDb, 6, 0.4)
+  const edgeBandScore = sigmoid(f.edgePrbExcessDb, 3.5, 0.6)
+  const partialScore  = Math.max(lowBandScore, edgeBandScore)
+  c.push([partialScore, 5])
+  if (f.lowPrbExcessDb >= f.edgePrbExcessDb && f.lowPrbExcessDb > 4)
+    ev.push(`low_prb_excess=${f.lowPrbExcessDb.toFixed(1)} dB — harmonic at low end of UL band`)
+  else if (f.edgePrbExcessDb > 3)
+    ev.push(`edge_prb_excess=${f.edgePrbExcessDb.toFixed(1)} dB — bilateral FM harmonics at band edges`)
+
+  // MUST be continuous 24/7 — FM broadcast stations run non-stop
+  let s = invSig(f.temporalCv, 0.12)
+  c.push([s, 5]); if (s > 0.5) ev.push(`temporal_cv=${f.temporalCv.toFixed(2)} (continuous broadcast)`)
+
+  // NOT traffic-correlated (rules out PIM which is DL-traffic driven)
   s = invSig(Math.abs(f.trafficCorrelation), 0.30)
-  c.push([s, 1.5])
+  c.push([s, 3]); if (s > 0.5) ev.push(`traffic_corr=${f.trafficCorrelation.toFixed(2)} (external, not PIM)`)
+
+  // Partial-band width: 6–72% of PRBs (~0.6–7.2 MHz in a 10 MHz channel).
+  // Narrower than Cable TV (100%), wider than a TV digital block (12–35%).
+  s = inRange(f.peakClusterWidthPct, 6, 72)
+  c.push([s, 2.5])
+  if (s > 0.5) {
+    const bwEst = (f.peakClusterWidthPct / 100 * 10).toFixed(1)
+    ev.push(`peak_width=${f.peakClusterWidthPct.toFixed(1)}% (~${bwEst} MHz of 10 MHz ch — front-end blocking span)`)
+  }
+
+  // Peak level: FM harmonic field range -102 to -67 dBm
+  s = inRange(f.peakDbm, -102, -67)
+  c.push([s, 1.5]); if (s > 0.5) ev.push(`peak=${f.peakDbm.toFixed(1)} dBm (within FM harmonic range)`)
+
+  // Bonus: ultra-narrow spike (< 4%) is also compatible — FM very close to cell
+  if (f.peakClusterWidthPct < 4) {
+    c.push([0.8, 1])
+    ev.push(`peak_width=${f.peakClusterWidthPct.toFixed(1)}% — ultra-narrow spike (high-order harmonic or distant FM)`)
+  }
+
   return [weightedMean(c), ev]
 }
 
@@ -850,8 +954,8 @@ const MITIGATIONS: Partial<Record<SourceType, MitigationAction[]>> = {
       title: 'Evolved UL Frequency-Selective Scheduling (FAJ 121 4966)',
       type: 'CM',
       featureId: 'FAJ 121 4966',
-      description: 'Avoids the specific 1–3 PRBs impacted by the FM harmonic spike, preserving UL SINR on all other PRBs.',
-      expectedKpiImpact: ['UL SINR improvement for PUSCH on clean PRBs', 'Narrow impact: only affected PRBs blocked'],
+      description: 'Avoids PRBs impacted by the FM harmonic front-end blocking zone. Field evidence shows harmonics can desensitise up to ~6.3 MHz (≈31 of 50 PRBs in a 10 MHz channel) even though the RF spike is ≤1.5 MHz. FSS concentrates UL scheduling on the clean PRBs, recovering SINR.',
+      expectedKpiImpact: ['UL SINR +2–5 dB on clean PRBs', 'UL Throughput +15–30% (moves traffic off ~60% affected PRBs)', 'PUSCH BLER reduction'],
       neighborImpactRadiusKm: 0,
       urgency: 'LOW',
       requiresFieldVisit: false,
@@ -861,8 +965,8 @@ const MITIGATIONS: Partial<Record<SourceType, MitigationAction[]>> = {
       title: 'Activate UL Spectrum Analyzer (FAJ 121 4271)',
       type: 'CM',
       featureId: 'FAJ 121 4271',
-      description: 'Confirms the exact PRB position of the FM harmonic spike and provides frequency (PRB index × channel raster) to identify the responsible FM station.',
-      expectedKpiImpact: ['Diagnostic: pinpoints harmonic PRB for targeted avoidance'],
+      description: 'Captures PRB-level UL interference histogram to confirm the low-PRB or bilateral-edge elevation pattern. The affected PRB block edge (frequency = PRB_start + PRB_index × 180 kHz) is used to back-calculate the harmonic frequency. Then: harmonic_freq ÷ N (N=2..12) is checked against the FM station database for the area to identify the responsible station.',
+      expectedKpiImpact: ['Diagnostic: identifies exact harmonic order and FM station', 'Enables precise FSS avoidance zone and regulatory complaint'],
       neighborImpactRadiusKm: 0,
       urgency: 'HIGH',
       requiresFieldVisit: false,

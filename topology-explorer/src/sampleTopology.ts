@@ -56,10 +56,38 @@ function slopedHistogram(baseLow: number, slopeDbPrb: number): number[][] {
   )
 }
 
-/** Narrow spike 1-3 PRBs, continuous 24/7 — FM Radio Harmonic */
-function fmHarmonicHistogram(centerPrb: number, peakLevel: number, widthPrb = 2): number[][] {
+/**
+ * FM Radio Harmonic — partial-band elevation at LOW PRBs, continuous 24/7 (VALX1509Y2A pattern).
+ *
+ * Field evidence (Movistar AR + SeeWave spectrum captures) shows the FM harmonic
+ * desensitises ~60% of PRBs even though the RF spike is ≤1.5 MHz wide. The front-end
+ * blocking effect spreads the interference across adjacent PRBs.
+ *
+ * Example: 8th harmonic of 103.3 MHz FM = 826.4 MHz → falls at the LOW end of
+ * B5 UL (824–849 MHz), elevating PRBs 0–30 to ~-70 dBm while PRBs 31–49 stay at thermal.
+ *
+ * @param nAffected  Number of PRBs elevated (typically 28–35 for a 10 MHz channel, ~60%)
+ * @param level      Interference level in dBm at the affected PRBs (e.g. -70.0)
+ */
+function fmHarmonicHistogram(nAffected = 31, level = -70.0): number[][] {
   return Array.from({ length: N }, (_, prb) =>
-    Array(24).fill(Math.abs(prb - centerPrb) <= widthPrb / 2 ? peakLevel : THERMAL)
+    Array(24).fill(prb < nAffected ? level : THERMAL)
+  )
+}
+
+/**
+ * FM Harmonic bilateral-edge pattern (BALX0407M1A pattern).
+ *
+ * Occurs when harmonics from two different FM stations hit both ends of the LTE UL band,
+ * or when the harmonic falls near the channel edge and front-end IM products appear
+ * symmetrically. Both edge blocks are elevated, centre PRBs are cleaner.
+ *
+ * @param edgePrbs  Width of each edge block in PRBs (e.g. 9 → PRBs 0–8 and 41–49)
+ * @param level     Interference level at edges in dBm (e.g. -70.0)
+ */
+function fmHarmonicEdgeHistogram(edgePrbs = 9, level = -70.0): number[][] {
+  return Array.from({ length: N }, (_, prb) =>
+    Array(24).fill(prb < edgePrbs || prb >= N - edgePrbs ? level : THERMAL)
   )
 }
 
@@ -590,11 +618,13 @@ const sampleTopology: Topology = {
       pci: 77,
       azimuth: 45,
       tilt: 3,
-      prbHistogram: fmHarmonicHistogram(8, -76.0, 2),
-      // PREV: harmónico más ancho (antes de confirmar PRB exacto con FAJ 4271)
-      prbHistogramPrev: fmHarmonicHistogram(8, -76.0, 5),
+      // CURRENT: 8th harmonic 103.3 MHz × 8 = 826.4 MHz → LOW end of B5 UL (824–849 MHz)
+      // ~31/50 PRBs elevated at -70 dBm (VALX1509Y2A pattern). FAJ 4271 confirmed PRB position.
+      prbHistogram: fmHarmonicHistogram(31, -70.0),
+      // PREV: before FAJ 4271 spectrum scan, wider affected zone and more severe (35 PRBs at -67 dBm)
+      prbHistogramPrev: fmHarmonicHistogram(35, -67.0),
       trafficPerHour: FLAT_TRAFFIC,
-      kpi: { rssi_avg_dbm: -100, ul_sinr_p50_db: -0.8, pusch_bler_avg: 0.06, ul_thp_mbps: 8.1, prb_util_ul: 0.38 },
+      kpi: { rssi_avg_dbm: -88, ul_sinr_p50_db: -2.4, pusch_bler_avg: 0.14, ul_thp_mbps: 4.3, prb_util_ul: 0.55 },
     },
     {
       id: 'C025',
@@ -609,10 +639,11 @@ const sampleTopology: Topology = {
       pci: 78,
       azimuth: 165,
       tilt: 2,
-      // Mismo sitio, sector diferente — FM harmónico menos visible por azimuth
-      prbHistogram: fmHarmonicHistogram(8, -84.0, 2),
+      // Same site, different azimuth — FM harmonic less visible (18/50 PRBs affected at -84 dBm)
+      // Bilateral edge pattern (BALX0407M1A): two FM harmonics hitting both ends of the band
+      prbHistogram: fmHarmonicEdgeHistogram(9, -72.0),
       trafficPerHour: FLAT_TRAFFIC,
-      kpi: { rssi_avg_dbm: -103, ul_sinr_p50_db: 0.5, pusch_bler_avg: 0.03, ul_thp_mbps: 10.2, prb_util_ul: 0.31 },
+      kpi: { rssi_avg_dbm: -99, ul_sinr_p50_db: -0.3, pusch_bler_avg: 0.05, ul_thp_mbps: 7.8, prb_util_ul: 0.40 },
     },
     {
       id: 'C026',
