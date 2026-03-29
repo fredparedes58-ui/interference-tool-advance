@@ -625,6 +625,142 @@ tbody tr.active {
   font-size: 1.5rem;
 }
 
+/* Badge on Alerts nav button */
+.nav-item {
+  position: relative;
+}
+.nav-badge {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.55rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 4px;
+  line-height: 1.2;
+}
+
+/* ── Alerts Panel ─────────────────────────────────────────── */
+.alerts-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(11, 17, 32, 0.97);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.2rem 5rem;
+  overflow: hidden;
+}
+
+.alerts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-shrink: 0;
+}
+
+.alerts-header h2 {
+  font-size: 1rem;
+  color: #00e5ff;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.alerts-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.alerts-count {
+  font-size: 0.75rem;
+  color: #64748b;
+  background: rgba(255,255,255,0.05);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+.alerts-empty {
+  text-align: center;
+  margin-top: 3rem;
+  color: #64748b;
+}
+
+.alerts-list {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.7rem;
+  padding-right: 0.3rem;
+}
+
+.alert-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.alert-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.alert-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+}
+
+.alert-score {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.alert-severe  .alert-badge { background: rgba(239,68,68,0.25);  color: #f87171; }
+.alert-medium  .alert-badge { background: rgba(245,158,11,0.25); color: #fbbf24; }
+.alert-low     .alert-badge { background: rgba(59,130,246,0.25); color: #60a5fa; }
+.alert-moderate .alert-badge { background: rgba(100,116,139,0.2); color: #94a3b8; }
+
+.alert-severe  { border-left: 3px solid #ef4444; }
+.alert-medium  { border-left: 3px solid #f59e0b; }
+.alert-low     { border-left: 3px solid #3b82f6; }
+
+.alert-cell-id {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.alert-site {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.alert-details {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+}
+
+.alert-suggestion {
+  font-size: 0.7rem;
+  color: #c7d2fe;
+  margin-top: 0.2rem;
+}
+
 .drawer.empty {
   color: #94a3b8;
   font-size: 0.95rem;

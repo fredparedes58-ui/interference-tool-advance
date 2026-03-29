@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
@@ -124,6 +124,8 @@ function App() {
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [mapStyleId, setMapStyleId] = useState<string>('blueprint')
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts'>('map')
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
     TECH_OPTIONS.forEach((tech) => {
@@ -940,6 +942,16 @@ function App() {
     }))
   }
 
+  // ---- Bottom nav handlers ----
+  const handleNavMap = () => setActiveView('map')
+  const handleNavTopology = () => {
+    setActiveView('topology')
+    setPanelCollapsed(false)
+  }
+  const handleNavAdd = () => fileInputRef.current?.click()
+  const handleNavStats = () => setActiveView('stats')
+  const handleNavAlerts = () => setActiveView('alerts')
+
   const currentMapStyle = useMemo(() => {
     return MAP_STYLES.find((style) => style.id === mapStyleId) ?? MAP_STYLES[0]
   }, [mapStyleId])
@@ -989,7 +1001,7 @@ function App() {
         </button>
       ) : null}
 
-      <section className="kpi-widgets">
+      {activeView === 'stats' && <section className="kpi-widgets">
         <h2>KPI Widgets</h2>
         <div className="stat-grid">
           <StatCard label="Sites" value={kpis.sites} />
@@ -1052,7 +1064,47 @@ function App() {
             </>
           )}
         </div>
-      </section>
+      </section>}
+
+      {activeView === 'alerts' && (
+        <section className="alerts-panel">
+          <div className="alerts-header">
+            <h2>Interference Alerts</h2>
+            <div className="alerts-header-actions">
+              <span className="alerts-count">{interferenceIssues.length} issues</span>
+              {interferenceIssues.length > 0 && (
+                <button className="ghost" onClick={handleExportIssues}>Export CSV</button>
+              )}
+              <button className="ghost" onClick={() => setActiveView('map')}>✕ Close</button>
+            </div>
+          </div>
+          {interferenceIssues.length === 0 ? (
+            <p className="muted alerts-empty">No hay alertas activas. Aplica filtros de banda/región para analizar una zona.</p>
+          ) : (
+            <div className="alerts-list">
+              {interferenceIssues.map((issue) => {
+                const severityClass =
+                  issue.issueType === 'Severe Interference' ? 'alert-severe'
+                  : issue.issueType === 'BLER Elevated' ? 'alert-medium'
+                  : issue.issueType === 'High Noise' ? 'alert-low'
+                  : 'alert-moderate'
+                return (
+                  <div key={`${issue.cellId}-${issue.siteId}`} className={`alert-card ${severityClass}`}>
+                    <div className="alert-card-top">
+                      <span className="alert-badge">{issue.issueType}</span>
+                      <span className="alert-score">Score {(issue.score * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="alert-cell-id">{issue.cellId}</div>
+                    <div className="alert-site">{issue.siteName} · {issue.region}</div>
+                    <p className="alert-details">{issue.details}</p>
+                    <p className="alert-suggestion"><strong>Acción:</strong> {issue.suggestion}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="stats-stack">
         <div className="stat-orb">
@@ -1147,24 +1199,52 @@ function App() {
         />
       )}
 
+      {/* Hidden file input — triggered by the + button */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleUpload(file)
+          e.target.value = ''
+        }}
+      />
+
       <nav className="bottom-nav">
-        <button className="nav-item active" onClick={() => console.log('Map clicked')}>
+        <button
+          className={`nav-item ${activeView === 'map' ? 'active' : ''}`}
+          onClick={handleNavMap}
+        >
           <span className="material-icons-round nav-icon">map</span>
           <span>Map</span>
         </button>
-        <button className="nav-item" onClick={() => console.log('Topology clicked')}>
+        <button
+          className={`nav-item ${activeView === 'topology' ? 'active' : ''}`}
+          onClick={handleNavTopology}
+        >
           <span className="material-icons-round nav-icon">hub</span>
           <span>Topology</span>
         </button>
-        <button className="nav-item main-action" onClick={() => console.log('Add clicked')}>
+        <button className="nav-item main-action" onClick={handleNavAdd} title="Import topology JSON">
           <span className="material-icons-round nav-icon">add</span>
         </button>
-        <button className="nav-item" onClick={() => console.log('Stats clicked')}>
+        <button
+          className={`nav-item ${activeView === 'stats' ? 'active' : ''}`}
+          onClick={handleNavStats}
+        >
           <span className="material-icons-round nav-icon">analytics</span>
           <span>Stats</span>
         </button>
-        <button className="nav-item" onClick={() => console.log('Alerts clicked')}>
+        <button
+          className={`nav-item ${activeView === 'alerts' ? 'active' : ''}`}
+          onClick={handleNavAlerts}
+        >
           <span className="material-icons-round nav-icon">notifications</span>
+          {interferenceIssues.length > 0 && (
+            <span className="nav-badge">{interferenceIssues.length}</span>
+          )}
           <span>Alerts</span>
         </button>
       </nav>
