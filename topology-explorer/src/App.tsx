@@ -125,6 +125,7 @@ function App() {
   const [mapStyleId, setMapStyleId] = useState<string>('blueprint')
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts'>('map')
+  const [pendingAutoApply, setPendingAutoApply] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
@@ -232,6 +233,7 @@ function App() {
         if (normalized.ok) {
           setTopology(normalized.data)
           setTopologyKey('topology.json')
+          setPendingAutoApply(true)
         }
       } catch {
         // ignore if not available
@@ -372,6 +374,24 @@ function App() {
       return next
     })
   }, [availableRegions])
+
+  // Auto-apply: when a new topology is loaded, show all data immediately
+  useEffect(() => {
+    if (!pendingAutoApply || availableBands.length === 0) return
+    setPendingAutoApply(false)
+    const allBands: Record<string, boolean> = {}
+    availableBands.forEach((b) => { allBands[b] = true })
+    const allTechs: Record<string, boolean> = {}
+    TECH_OPTIONS.forEach((t) => { allTechs[t] = true })
+    setTechFilters(allTechs)
+    setBandFilters(allBands)
+    setAppliedSearch('')
+    setAppliedTechFilters(allTechs)
+    setAppliedBandFilters(allBands)
+    setAppliedVendorFilters({})
+    setAppliedRegionFilters({})
+    setAppliedOnce(true)
+  }, [pendingAutoApply, availableBands])
 
   const enabledBands = useMemo(
     () => availableBands.filter((band) => bandFilters[band]),
@@ -623,6 +643,7 @@ function App() {
       setSelectedSiteId(null)
       setSearch('')
       setTopologyKey(file.name)
+      setPendingAutoApply(true)
     } catch (err) {
       setUploadError('El archivo no es un JSON valido.')
     }
@@ -806,6 +827,7 @@ function App() {
           return {
             lat: site.lat,
             lon: site.lon,
+            siteId: site.id,
             issueType: issue.issueType,
             score: issue.score,
             details: issue.details,
@@ -942,6 +964,12 @@ function App() {
     }))
   }
 
+  const handleSelectHotspot = useCallback((siteId: string) => {
+    setSelectedSiteId(siteId)
+    setZoomSignal((prev) => prev + 1)
+    setActiveView('alerts')
+  }, [])
+
   // ---- Bottom nav handlers ----
   const handleNavMap = () => setActiveView('map')
   const handleNavTopology = () => {
@@ -968,6 +996,7 @@ function App() {
           selectedSiteId={selectedSiteId}
           onSelectSite={handleSelectSite}
           onSelectCell={handleSelectCell}
+          onSelectHotspot={handleSelectHotspot}
           showLinks={showLinks}
           zoomToSelectedSignal={zoomSignal}
           cells={displayCells}

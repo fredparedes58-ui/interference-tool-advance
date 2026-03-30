@@ -28,6 +28,7 @@ type MapViewProps = {
   hotspotAreas: {
     lat: number
     lon: number
+    siteId: string
     issueType: string
     score: number
     details: string
@@ -38,6 +39,7 @@ type MapViewProps = {
   backdrop: string
   onSelectSite: (siteId: string) => void
   onSelectCell?: (cellId: string) => void
+  onSelectHotspot?: (siteId: string) => void
   zoomToSelectedSignal: number
   sourceHeatmapGeoJSON?: SourceHeatmapGeoJSON
 }
@@ -81,6 +83,7 @@ const MapView = ({
   backdrop,
   onSelectSite,
   onSelectCell,
+  onSelectHotspot,
   zoomToSelectedSignal,
   sourceHeatmapGeoJSON,
 }: MapViewProps) => {
@@ -234,6 +237,7 @@ const MapView = ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
             properties: {
+              siteId: item.siteId,
               issueType: item.issueType,
               score: item.score,
               details: item.details,
@@ -499,6 +503,28 @@ const MapView = ({
         map.getCanvas().style.cursor = ''
       })
 
+      map.on('click', 'hotspots-circle', (event) => {
+        const feature = event.features?.[0]
+        if (!feature) return
+        const siteId = feature.properties?.siteId
+        if (typeof siteId === 'string') {
+          map.flyTo({
+            center: (feature.geometry as any).coordinates,
+            zoom: Math.max(map.getZoom(), 13),
+            duration: 700,
+          })
+          onSelectHotspot?.(siteId)
+        }
+      })
+
+      map.on('mouseenter', 'hotspots-circle', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+
+      map.on('mouseleave', 'hotspots-circle', () => {
+        map.getCanvas().style.cursor = ''
+      })
+
       map.on('mousemove', 'hotspots-circle', (event) => {
         const feature = event.features?.[0]
         if (!feature) return
@@ -612,6 +638,7 @@ const MapView = ({
             coordinates: [item.lon, item.lat],
           },
           properties: {
+            siteId: item.siteId,
             issueType: item.issueType,
             score: item.score,
             details: item.details,
