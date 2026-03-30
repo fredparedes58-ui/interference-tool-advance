@@ -169,6 +169,19 @@ const MapView = ({
     [cells, siteById, bandRadius]
   )
 
+  const cellsCenterGeojson = useMemo(() => ({
+    type: 'FeatureCollection' as const,
+    features: cells.flatMap((cell) => {
+      const site = siteById.get(cell.siteId)
+      if (!site) return []
+      return [{
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [site.lon, site.lat] as [number, number] },
+        properties: { id: cell.id, band: cell.band ?? 'Unknown', siteId: cell.siteId },
+      }]
+    }),
+  }), [cells, siteById])
+
   const interferenceGeojson = useMemo(
     () =>
       buildInterferenceGrid(interferenceSamples, sites, cells, selectedHour, {
@@ -222,6 +235,11 @@ const MapView = ({
       map.addSource('cells', {
         type: 'geojson',
         data: cellsGeojson,
+      })
+
+      map.addSource('cells-center', {
+        type: 'geojson',
+        data: cellsCenterGeojson,
       })
 
       map.addSource('links', {
@@ -413,9 +431,24 @@ const MapView = ({
       })
 
       map.addLayer({
+        id: 'cells-dot',
+        type: 'circle',
+        source: 'cells-center',
+        maxzoom: 10,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2, 7, 3.5, 10, 5],
+          'circle-color': bandFillExpression,
+          'circle-opacity': 0.85,
+          'circle-stroke-color': '#0f172a',
+          'circle-stroke-width': 0.5,
+        },
+      })
+
+      map.addLayer({
         id: 'cells-sector',
         type: 'fill',
         source: 'cells',
+        minzoom: 10,
         paint: {
           'fill-color': bandFillExpression,
           'fill-opacity': [
@@ -436,6 +469,7 @@ const MapView = ({
         id: 'cells-sector-line',
         type: 'line',
         source: 'cells',
+        minzoom: 10,
         paint: {
           'line-color': '#0f172a',
           'line-width': [
@@ -620,6 +654,13 @@ const MapView = ({
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
+    const source = map.getSource('cells-center') as maplibregl.GeoJSONSource
+    if (source) source.setData(cellsCenterGeojson)
+  }, [cellsCenterGeojson])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
     const source = map.getSource('links') as maplibregl.GeoJSONSource
     if (source) source.setData(linksGeojson)
   }, [linksGeojson])
@@ -681,8 +722,9 @@ const MapView = ({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !map.getLayer('cells-sector')) return
-    map.setPaintProperty('cells-sector', 'fill-color', bandFillExpression)
+    if (!map) return
+    if (map.getLayer('cells-sector')) map.setPaintProperty('cells-sector', 'fill-color', bandFillExpression)
+    if (map.getLayer('cells-dot')) map.setPaintProperty('cells-dot', 'circle-color', bandFillExpression)
   }, [bandFillExpression])
 
   useEffect(() => {
