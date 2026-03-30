@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { ChangeEvent } from 'react'
-import type { Site, Tech } from '../types'
+import type { Link, Site, Tech } from '../types'
 
 type PresetName = 'Suave' | 'Medio' | 'Intenso' | 'Custom'
 
@@ -56,6 +56,10 @@ type SidebarProps = {
   selectedSiteId?: string | null
   showLinks?: boolean
   onToggleLinks?: (value: boolean) => void
+  links?: Link[]
+  enabledLinkIds?: Set<string>
+  onToggleLink?: (id: string) => void
+  onToggleAllLinks?: (all: boolean) => void
 }
 
 const Sidebar = ({
@@ -102,6 +106,10 @@ const Sidebar = ({
   onUpload,
   uploadError,
   onExport,
+  links = [],
+  enabledLinkIds,
+  onToggleLink,
+  onToggleAllLinks,
 }: SidebarProps) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -434,6 +442,39 @@ const Sidebar = ({
           Reset filters
         </button>
       </section>
+
+      {links.length > 0 && (
+        <section className="panel">
+          <div className="panel-header" style={{ marginBottom: 8 }}>
+            <h2>Links</h2>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="ghost" style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                onClick={() => onToggleAllLinks?.(true)}>All</button>
+              <button className="ghost" style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                onClick={() => onToggleAllLinks?.(false)}>None</button>
+            </div>
+          </div>
+          <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {links.map(link => {
+              const enabled = enabledLinkIds ? enabledLinkIds.has(link.id) : true
+              return (
+                <label key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.78rem', padding: '3px 0' }}>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => onToggleLink?.(link.id)}
+                    style={{ accentColor: '#06b6d4', width: 14, height: 14 }}
+                  />
+                  <span style={{ color: enabled ? '#e2e8f0' : '#475569' }}>
+                    {link.fromSiteId} → {link.toSiteId}
+                    {link.kind && <span style={{ color: '#64748b', marginLeft: 4 }}>({link.kind})</span>}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <h2>Import / Export</h2>

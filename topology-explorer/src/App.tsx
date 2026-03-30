@@ -94,8 +94,9 @@ function App() {
   const [search, setSearch] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
   const [showLinks, setShowLinks] = useState(true)
+  const [enabledLinkIds, setEnabledLinkIds] = useState<Set<string>>(new Set())
   const [zoomSignal, setZoomSignal] = useState(0)
-  const [showInterference, setShowInterference] = useState(true)
+  const [showInterference, setShowInterference] = useState(false)
   const [selectedHour, setSelectedHour] = useState<string | null>(null)
   const [gridStepDeg, setGridStepDeg] = useState(DEFAULT_GRID_STEP)
   const [baseWeight, setBaseWeight] = useState(DEFAULT_BASE_WEIGHT)
@@ -223,6 +224,11 @@ function App() {
   }, [])
 
   console.log('App component initialized, topology:', topology)
+
+  // Initialize enabledLinkIds when topology changes
+  useEffect(() => {
+    setEnabledLinkIds(new Set(topology.links.map(l => l.id)))
+  }, [topology.links])
 
   useEffect(() => {
     const loadTopologyFile = async () => {
@@ -969,7 +975,19 @@ function App() {
     setSelectedSiteId(siteId)
     setZoomSignal((prev) => prev + 1)
     setActiveView('alerts')
-  }, [])
+    // Auto-select the most affected cell of the site to open CellAnalysisPanel
+    const siteCells = topology.cells.filter(c => c.siteId === siteId)
+    if (siteCells.length > 0) {
+      // Prefer cells with PRB data, else pick first
+      const withPrb = siteCells.find(c => c.prbHistogram && c.prbHistogram.length > 0)
+      const worstKpi = siteCells.reduce((best, c) => {
+        const score = (c.kpi?.pusch_bler_avg ?? 0) + (c.kpi?.pucch_bler_avg ?? 0)
+        const bestScore = (best.kpi?.pusch_bler_avg ?? 0) + (best.kpi?.pucch_bler_avg ?? 0)
+        return score > bestScore ? c : best
+      }, siteCells[0])
+      setSelectedCellId((withPrb ?? worstKpi).id)
+    }
+  }, [topology.cells])
 
   // ---- Bottom nav handlers ----
   const handleNavMap = () => setActiveView('map')
@@ -992,7 +1010,7 @@ function App() {
       <div className="map-stage">
         <MapView
           sites={filteredSites}
-          links={showLinks ? filteredLinks : []}
+          links={showLinks ? filteredLinks.filter(l => enabledLinkIds.has(l.id)) : []}
           bands={availableBands}
           selectedSiteId={selectedSiteId}
           onSelectSite={handleSelectSite}
@@ -1212,6 +1230,14 @@ function App() {
         onExport={handleExport}
         onZoomSelected={onZoomSelected}
         hasSelection={Boolean(selectedSite)}
+        links={filteredLinks}
+        enabledLinkIds={enabledLinkIds}
+        onToggleLink={(id) => setEnabledLinkIds(prev => {
+          const next = new Set(prev)
+          if (next.has(id)) next.delete(id); else next.add(id)
+          return next
+        })}
+        onToggleAllLinks={(all) => setEnabledLinkIds(all ? new Set(filteredLinks.map(l => l.id)) : new Set())}
       />
 
       <SiteDrawer
