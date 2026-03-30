@@ -834,7 +834,7 @@ function App() {
             details: issue.details,
           }
         })
-        .filter((i): i is { lat: number; lon: number; issueType: string; score: number; details: string } => Boolean(i)),
+        .filter((i): i is { lat: number; lon: number; siteId: string; issueType: string; score: number; details: string } => Boolean(i)),
     [interferenceIssues, topology.sites]
   )
 
