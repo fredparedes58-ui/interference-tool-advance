@@ -10,7 +10,7 @@ const WELCOME: Message = {
   id: 0,
   role: 'assistant',
   content:
-    'Hola! Soy tu asistente de **Interference Explorer**.\n\nPuedo ayudarte a:\n- Importar y visualizar tu topología de red\n- Interpretar resultados del clasificador de interferencia\n- Guiarte paso a paso en cualquier función de la app\n- Explicar qué significan las alertas y cómo actuar\n\n¿En qué te ayudo?',
+    'Hola! Soy **Hunter**, tu analista de interferencia RF.\n\nPuedo ayudarte a:\n- Importar y visualizar tu topología de red\n- Interpretar resultados del clasificador de interferencia\n- Guiarte paso a paso en cualquier función de la app\n- Explicar qué significan las alertas y cómo actuar\n\n¿En qué te ayudo?',
 }
 
 function renderMarkdown(text: string): string {
@@ -109,8 +109,8 @@ export default function ChatBot() {
           <div className="chatbot-header">
             <span className="material-icons-round chatbot-header-icon">smart_toy</span>
             <div>
-              <div className="chatbot-title">Asistente RF</div>
-              <div className="chatbot-subtitle">Interference Explorer AI</div>
+              <div className="chatbot-title">Hunter</div>
+              <div className="chatbot-subtitle">RF Interference Analyst</div>
             </div>
             <button className="chatbot-close" onClick={() => setOpen(false)}>
               <span className="material-icons-round">close</span>
