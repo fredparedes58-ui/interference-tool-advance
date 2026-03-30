@@ -289,38 +289,143 @@ def load_kpi_file(kpi_path: Path) -> dict[str, dict]:
     return result
 
 
+def _parse_eu_number(s: str) -> float:
+    """Convierte número europeo '5.804.956,00' → 5804956.0"""
+    s = s.strip().strip('"')
+    if not s or s in ('-', 'NULL', 'null', ''):
+        return 0.0
+    s = s.replace('.', '').replace(',', '.')
+    return float(s)
+
+
 def load_prb_file(prb_path: Path) -> dict[str, list[list[float]]]:
     """
-    Lee CSV de PRB histograma real (SeeWave / OMI export).
+    Lee CSV de PRB histograma.
 
-    Formato 1 — PRB-mayor (una fila por PRB × celda):
-      cell_id;prb_index;h00;h01;h02;...;h23
+    Formato ENM (detectado automáticamente):
+      DIA,HORA,4G_ENODOB,4G_EUTRANCELL,Pmradiorecinterferencepwrprb1,...,prb100
+      Encoding: UTF-16 con BOM. Números europeos: "5.804.956,00"
+      Fórmula: 10*LOG10(raw/90000) - 132.45
+      Agrega: media por hora sobre todos los días disponibles → prbHistogram[100][24]
 
-    Formato 2 — hora-mayor (una fila por hora × celda):
+    Formato SeeWave/OMI — PRB-mayor:
+      cell_id;prb_index;h00;h01;...;h23
+
+    Formato SeeWave/OMI — hora-mayor:
       cell_id;hour;prb_00;prb_01;...;prb_N
 
-    Detecta el formato por la segunda columna del header.
-    Devuelve: { cell_id: [[h0..h23], [h0..h23], ...] }  (N_PRB × 24)
+    Devuelve: { cell_id: [[h0..h23], ...] }  (N_PRB × 24)
     """
+    import math
+
     result: dict[str, list[list[float]]] = {}
     if not prb_path.exists():
         print(f"AVISO: --prb-file no encontrado: {prb_path}")
         return result
 
-    with open(prb_path, encoding="utf-8-sig", errors="replace") as f:
-        header_line = next(f, "").strip().lower()
-        sep = ";" if ";" in header_line else ","
+    # --- Detectar encoding y leer cabecera ---
+    with open(prb_path, 'rb') as fb:
+        bom = fb.read(2)
+    is_utf16 = bom in (b'\xff\xfe', b'\xfe\xff')
+    encoding = 'utf-16' if is_utf16 else 'utf-8-sig'
+
+    import csv
+    with open(prb_path, encoding=encoding, errors='replace', newline='') as f:
+        reader = csv.reader(f)
+        raw_headers = next(reader, [])
+
+    headers_lower = [h.strip().strip('"').lower() for h in raw_headers]
+
+    # --- Formato ENM: tiene columnas DIA, HORA, 4G_EUTRANCELL, PmradiorecinterferencepwrprbN ---
+    is_enm = ('dia' in headers_lower and 'hora' in headers_lower
+               and any('pmradiorecinterferencepwrprb' in h for h in headers_lower))
+
+    if is_enm:
+        # Mapear columnas PRB: nombre_lower → índice_prb (1-based)
+        prb_col_map: dict[int, int] = {}  # col_index → prb_number
+        for i, h in enumerate(headers_lower):
+            m = re.search(r'pmradiorecinterferencepwrprb(\d+)', h)
+            if m:
+                prb_col_map[i] = int(m.group(1))
+        # También columna RadiorecinterferencepwrPRB100
+            m2 = re.search(r'radiorecinterferencepwrprb(\d+)', h)
+            if m2 and i not in prb_col_map:
+                prb_col_map[i] = int(m2.group(1))
+
+        hora_col = headers_lower.index('hora')
+        cell_col = headers_lower.index('4g_eutrancell') if '4g_eutrancell' in headers_lower else headers_lower.index('4g_eutrancel') if '4g_eutrancel' in headers_lower else 3
+
+        n_prb = max(prb_col_map.values()) if prb_col_map else 100
+
+        # Acumuladores: cell → prb_idx(0-based) → hour → [values]
+        accum: dict[str, dict[int, dict[int, list[float]]]] = {}
+
+        with open(prb_path, encoding=encoding, errors='replace', newline='') as f:
+            reader = csv.reader(f)
+            next(reader)  # skip header
+            for row in reader:
+                if len(row) <= cell_col:
+                    continue
+                cell_id = row[cell_col].strip().strip('"')
+                if not cell_id:
+                    continue
+                try:
+                    hour = int(row[hora_col].strip().strip('"'))
+                except (ValueError, IndexError):
+                    continue
+
+                if cell_id not in accum:
+                    accum[cell_id] = {}
+
+                for col_i, prb_num in prb_col_map.items():
+                    if col_i >= len(row):
+                        continue
+                    try:
+                        raw_val = _parse_eu_number(row[col_i])
+                        if raw_val <= 0:
+                            dbm = THERMAL_FLOOR
+                        else:
+                            dbm = round(10.0 * math.log10(raw_val / 90000.0) - 132.45, 1)
+                        # Clamp to reasonable range (-125=piso PRB, -40=interferencia critica)
+                        dbm = max(-125.0, min(-40.0, dbm))
+                    except (ValueError, ZeroDivisionError):
+                        dbm = THERMAL_FLOOR
+
+                    prb_idx = prb_num - 1  # 0-based
+                    if prb_idx not in accum[cell_id]:
+                        accum[cell_id][prb_idx] = {}
+                    if hour not in accum[cell_id][prb_idx]:
+                        accum[cell_id][prb_idx][hour] = []
+                    accum[cell_id][prb_idx][hour].append(dbm)
+
+        # Construir prbHistogram[n_prb][24] como media por hora
+        for cell_id, prb_data in accum.items():
+            hist: list[list[float]] = []
+            for p in range(n_prb):
+                hour_row = []
+                for h in range(24):
+                    vals = prb_data.get(p, {}).get(h, [])
+                    hour_row.append(round(sum(vals) / len(vals), 1) if vals else THERMAL_FLOOR)
+                hist.append(hour_row)
+            result[cell_id] = hist
+
+        print(f"    PRB file ENM: {len(result)} celdas, {n_prb} PRBs, formula 10*LOG10(x/90000)-132.45")
+        return result
+
+    # --- Formato SeeWave/OMI ---
+    with open(prb_path, encoding=encoding, errors='replace') as f:
+        header_line = next(f, '').strip().lower()
+        sep = ';' if ';' in header_line else ','
         headers = [h.strip() for h in header_line.split(sep)]
 
-        # Detectar formato
-        fmt_prb_major = len(headers) >= 3 and "prb" in headers[1]  # Formato 1
-        fmt_hour_major = len(headers) >= 3 and "hour" in headers[1]  # Formato 2
+        fmt_prb_major = len(headers) >= 3 and 'prb' in headers[1]
+        fmt_hour_major = len(headers) >= 3 and 'hour' in headers[1]
 
         if not fmt_prb_major and not fmt_hour_major:
             print(f"AVISO: --prb-file formato no reconocido. Cabecera: {header_line[:80]}")
             return result
 
-        raw: dict[str, dict] = {}  # cell_id → {prb_idx/hour → [values]}
+        raw: dict[str, dict] = {}
 
         for line in f:
             parts = line.strip().split(sep)
@@ -336,17 +441,15 @@ def load_prb_file(prb_path: Path) -> dict[str, list[list[float]]]:
             values = []
             for v in parts[2:]:
                 try:
-                    values.append(float(v.replace(",", ".")))
+                    values.append(float(v.replace(',', '.')))
                 except ValueError:
                     values.append(THERMAL_FLOOR)
             if cell_id not in raw:
                 raw[cell_id] = {}
             raw[cell_id][idx] = values
 
-        # Construir matriz N_PRB × 24
         for cell_id, rows in raw.items():
             if fmt_prb_major:
-                # rows: { prb_index: [h0..h23] }
                 max_prb = max(rows.keys()) + 1
                 hist = []
                 for p in range(max_prb):
@@ -354,7 +457,6 @@ def load_prb_file(prb_path: Path) -> dict[str, list[list[float]]]:
                     hist.append([round(v, 1) for v in row[:24]])
                 result[cell_id] = hist
             else:
-                # rows: { hour: [prb_0..prb_N] }
                 n_prb = max(len(v) for v in rows.values()) if rows else 50
                 hist = [[THERMAL_FLOOR] * 24 for _ in range(n_prb)]
                 for h, prb_row in rows.items():
