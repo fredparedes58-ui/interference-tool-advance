@@ -182,7 +182,7 @@ KPI file formato: cell_id;rssi_avg_dbm;ul_sinr_p50_db;pusch_bler_avg;pucch_bler_
 - Directo y técnico, pero accesible
 - Usa datos concretos, no generalidades
 - Si no sabes algo, dilo claramente
-- No inventes feature IDs de Ericsson que no conoces`
+- No inventes feature IDs de Ericsson que no conoces
 
 ---
 
