@@ -14,7 +14,7 @@ import type { Cell, CellAnalysis, MitigationAction, SourceMatch } from '../types
 
 type Props = {
   cell: Cell
-  analysis: CellAnalysis
+  analysis: CellAnalysis | null
   allCells: Cell[]
   onClose: () => void
 }
@@ -378,9 +378,66 @@ function FeatureRow({ label, value, unit = '' }: { label: string; value: number;
 
 export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }: Props) {
   const [expandedAction, setExpandedAction] = useState<string | null>(
-    analysis.mitigations[0]?.id ?? null
+    analysis?.mitigations[0]?.id ?? null
   )
   const [showFeatures, setShowFeatures] = useState(false)
+
+  // No PRB data available — show basic cell info panel
+  if (!analysis) {
+    return (
+      <div className="cell-analysis-panel">
+        <div className="cap-header" style={{ borderBottomColor: '#475569' }}>
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="cap-cell-id">{cell.id}</span>
+              <span className="cap-tech-badge">{cell.tech}</span>
+              {cell.band && <span className="cap-band-badge">{cell.band}</span>}
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: 4 }}>
+              Site {cell.siteId}
+              {cell.azimuth !== undefined && ` · Az ${cell.azimuth}°`}
+              {cell.tilt !== undefined && ` · Tilt ${cell.tilt}°`}
+            </div>
+          </div>
+          <button className="cap-close-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="cap-body">
+          <div className="cap-section">
+            <div className="cap-section-title">Información de celda</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '0.83rem' }}>
+              {cell.vendor && <><span style={{ color: '#64748b' }}>Vendor</span><span>{cell.vendor}</span></>}
+              {cell.tech && <><span style={{ color: '#64748b' }}>Tecnología</span><span>{cell.tech}</span></>}
+              {cell.band && <><span style={{ color: '#64748b' }}>Banda</span><span>{cell.band}</span></>}
+              {cell.bwMhz !== undefined && <><span style={{ color: '#64748b' }}>BW</span><span>{cell.bwMhz} MHz</span></>}
+              {cell.azimuth !== undefined && <><span style={{ color: '#64748b' }}>Azimuth</span><span>{cell.azimuth}°</span></>}
+              {cell.tilt !== undefined && <><span style={{ color: '#64748b' }}>Tilt</span><span>{cell.tilt}°</span></>}
+              {cell.kpi?.niAvgDbm !== undefined && <><span style={{ color: '#64748b' }}>NI avg</span><span>{cell.kpi.niAvgDbm.toFixed(1)} dBm</span></>}
+              {cell.kpi?.ulSinrDb !== undefined && <><span style={{ color: '#64748b' }}>UL SINR</span><span>{cell.kpi.ulSinrDb.toFixed(1)} dB</span></>}
+              {cell.kpi?.puschBler !== undefined && <><span style={{ color: '#64748b' }}>PUSCH BLER</span><span>{(cell.kpi.puschBler * 100).toFixed(1)}%</span></>}
+              {cell.kpi?.pucchBler !== undefined && <><span style={{ color: '#64748b' }}>PUCCH BLER</span><span>{(cell.kpi.pucchBler * 100).toFixed(1)}%</span></>}
+            </div>
+          </div>
+          <div className="cap-section" style={{ marginTop: 16 }}>
+            <div
+              style={{
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: 8,
+                padding: '12px 16px',
+                fontSize: '0.82rem',
+                color: '#94a3b8',
+                lineHeight: 1.6,
+              }}
+            >
+              <span className="material-icons-round" style={{ fontSize: 16, verticalAlign: 'middle', marginRight: 6, color: '#38bdf8' }}>info</span>
+              Sin datos PRB para clasificar interferencia.<br />
+              Usa <strong style={{ color: '#e2e8f0' }}>py parse_enm_topology.py --kpi-file kpis.csv</strong> para habilitar el clasificador.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const primaryMatch = analysis.matches[0]
   const secondaryMatches = analysis.matches.slice(1, 4)

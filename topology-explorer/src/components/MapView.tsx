@@ -518,24 +518,24 @@ const MapView = ({
         })
       }
 
-      map.on('click', 'cells-sector', (event) => {
+      const handleCellClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         const feature = event.features?.[0]
-        const cellId = feature?.properties?.id   // geojson.ts uses 'id' for cell.id
+        const cellId = feature?.properties?.id
         const siteId = feature?.properties?.siteId
         if (typeof cellId === 'string' && onSelectCell) {
           onSelectCell(cellId)
         } else if (typeof siteId === 'string') {
           onSelectSite(siteId)
         }
-      })
+      }
 
-      map.on('mouseenter', 'cells-sector', () => {
-        map.getCanvas().style.cursor = 'pointer'
-      })
+      map.on('click', 'cells-sector', handleCellClick)
+      map.on('click', 'cells-dot', handleCellClick)
 
-      map.on('mouseleave', 'cells-sector', () => {
-        map.getCanvas().style.cursor = ''
-      })
+      map.on('mouseenter', 'cells-sector', () => { map.getCanvas().style.cursor = 'pointer' })
+      map.on('mouseleave', 'cells-sector', () => { map.getCanvas().style.cursor = '' })
+      map.on('mouseenter', 'cells-dot', () => { map.getCanvas().style.cursor = 'pointer' })
+      map.on('mouseleave', 'cells-dot', () => { map.getCanvas().style.cursor = '' })
 
       map.on('click', 'hotspots-circle', (event) => {
         const feature = event.features?.[0]

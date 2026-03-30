@@ -1220,7 +1220,7 @@ function App() {
         onClose={() => setSelectedSiteId(null)}
       />
 
-      {selectedCell && cellAnalysis && (
+      {selectedCell && (
         <CellAnalysisPanel
           cell={selectedCell}
           analysis={cellAnalysis}
