@@ -411,10 +411,10 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }:
               {cell.bwMhz !== undefined && <><span style={{ color: '#64748b' }}>BW</span><span>{cell.bwMhz} MHz</span></>}
               {cell.azimuth !== undefined && <><span style={{ color: '#64748b' }}>Azimuth</span><span>{cell.azimuth}°</span></>}
               {cell.tilt !== undefined && <><span style={{ color: '#64748b' }}>Tilt</span><span>{cell.tilt}°</span></>}
-              {cell.kpi?.niAvgDbm !== undefined && <><span style={{ color: '#64748b' }}>NI avg</span><span>{cell.kpi.niAvgDbm.toFixed(1)} dBm</span></>}
-              {cell.kpi?.ulSinrDb !== undefined && <><span style={{ color: '#64748b' }}>UL SINR</span><span>{cell.kpi.ulSinrDb.toFixed(1)} dB</span></>}
-              {cell.kpi?.puschBler !== undefined && <><span style={{ color: '#64748b' }}>PUSCH BLER</span><span>{(cell.kpi.puschBler * 100).toFixed(1)}%</span></>}
-              {cell.kpi?.pucchBler !== undefined && <><span style={{ color: '#64748b' }}>PUCCH BLER</span><span>{(cell.kpi.pucchBler * 100).toFixed(1)}%</span></>}
+              {cell.kpi?.rssi_avg_dbm !== undefined && <><span style={{ color: '#64748b' }}>NI avg</span><span>{cell.kpi.rssi_avg_dbm.toFixed(1)} dBm</span></>}
+              {cell.kpi?.ul_sinr_p50_db !== undefined && <><span style={{ color: '#64748b' }}>UL SINR</span><span>{cell.kpi.ul_sinr_p50_db.toFixed(1)} dB</span></>}
+              {cell.kpi?.pusch_bler_avg !== undefined && <><span style={{ color: '#64748b' }}>PUSCH BLER</span><span>{(cell.kpi.pusch_bler_avg * 100).toFixed(1)}%</span></>}
+              {cell.kpi?.pucch_bler_avg !== undefined && <><span style={{ color: '#64748b' }}>PUCCH BLER</span><span>{(cell.kpi.pucch_bler_avg * 100).toFixed(1)}%</span></>}
             </div>
           </div>
           <div className="cap-section" style={{ marginTop: 16 }}>
