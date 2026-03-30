@@ -3,6 +3,7 @@ import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
 import CellAnalysisPanel from './components/CellAnalysisPanel'
+import ChatBot from './components/ChatBot'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
@@ -1227,6 +1228,8 @@ function App() {
           onClose={() => setSelectedCellId(null)}
         />
       )}
+
+      <ChatBot />
 
       {/* Hidden file input — triggered by the + button */}
       <input
