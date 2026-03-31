@@ -2,7 +2,7 @@
   "version": 8,
   "name": "Offline Minimal",
   "sprite": "",
-  "glyphs": "",
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "sources": {},
   "layers": [
     {

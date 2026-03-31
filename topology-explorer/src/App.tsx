@@ -3,6 +3,8 @@ import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
 import CellAnalysisPanel from './components/CellAnalysisPanel'
+import KPIPanel from './components/KPIPanel'
+import type { KpiDataset } from './components/KPIPanel'
 import ChatBot from './components/ChatBot'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
@@ -125,9 +127,11 @@ function App() {
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [mapStyleId, setMapStyleId] = useState<string>('blueprint')
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts'>('map')
+  const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts' | 'kpi'>('map')
   const [pendingAutoApply, setPendingAutoApply] = useState(false)
+  const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const kpiFileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
     TECH_OPTIONS.forEach((tech) => {
@@ -246,6 +250,20 @@ function App() {
       }
     }
     loadTopologyFile()
+  }, [])
+
+  useEffect(() => {
+    const loadKpiData = async () => {
+      try {
+        const response = await fetch('/kpi_data.json')
+        if (!response.ok) return
+        const data = (await response.json()) as KpiDataset
+        setKpiData(data)
+      } catch {
+        // not available
+      }
+    }
+    loadKpiData()
   }, [])
 
   useEffect(() => {
@@ -992,6 +1010,16 @@ function App() {
     }
   }, [topology.cells])
 
+  const handleKpiUpload = async (file: File) => {
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text) as KpiDataset
+      setKpiData(data)
+    } catch {
+      // ignore invalid file
+    }
+  }
+
   // ---- Bottom nav handlers ----
   const handleNavMap = () => setActiveView('map')
   const handleNavTopology = () => {
@@ -1001,6 +1029,7 @@ function App() {
   const handleNavAdd = () => fileInputRef.current?.click()
   const handleNavStats = () => setActiveView('stats')
   const handleNavAlerts = () => setActiveView('alerts')
+  const handleNavKpi = () => setActiveView('kpi')
 
   const currentMapStyle = useMemo(() => {
     return MAP_STYLES.find((style) => style.id === mapStyleId) ?? MAP_STYLES[0]
@@ -1256,6 +1285,18 @@ function App() {
         />
       )}
 
+      {activeView === 'kpi' && (
+        <section className="kpi-full-panel">
+          <KPIPanel
+            kpiData={kpiData}
+            selectedCellId={selectedCellId}
+            cellPrbHistogram={selectedCell?.prbHistogram ?? null}
+            onClose={() => setActiveView('map')}
+            onUploadKpi={() => kpiFileInputRef.current?.click()}
+          />
+        </section>
+      )}
+
       <ChatBot />
 
       {/* Hidden file input — triggered by the + button */}
@@ -1270,8 +1311,20 @@ function App() {
           e.target.value = ''
         }}
       />
+      {/* Hidden KPI file input */}
+      <input
+        ref={kpiFileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleKpiUpload(file)
+          e.target.value = ''
+        }}
+      />
 
-      <nav className="bottom-nav">
+      <nav className="bottom-nav bottom-nav--6">
         <button
           className={`nav-item ${activeView === 'map' ? 'active' : ''}`}
           onClick={handleNavMap}
@@ -1295,6 +1348,14 @@ function App() {
         >
           <span className="material-icons-round nav-icon">analytics</span>
           <span>Stats</span>
+        </button>
+        <button
+          className={`nav-item ${activeView === 'kpi' ? 'active' : ''}`}
+          onClick={handleNavKpi}
+        >
+          <span className="material-icons-round nav-icon">bar_chart</span>
+          {kpiData && <span className="nav-badge nav-badge--green">✓</span>}
+          <span>KPIs</span>
         </button>
         <button
           className={`nav-item ${activeView === 'alerts' ? 'active' : ''}`}
