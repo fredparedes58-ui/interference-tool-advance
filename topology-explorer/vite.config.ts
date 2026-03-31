@@ -70,4 +70,16 @@ export default defineConfig({
     port: parseInt(process.env.PORT || '5173'),
     strictPort: false,
   },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react':   ['react', 'react-dom', 'react-is'],
+          'vendor-map':     ['maplibre-gl'],
+          'vendor-charts':  ['recharts'],
+        },
+      },
+    },
+  },
 })
