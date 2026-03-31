@@ -1,5 +1,7 @@
 import type {
   Cell,
+  CellCM,
+  CellKPI,
   InterferenceSample,
   Link,
   NormalizedTopology,
@@ -52,12 +54,17 @@ const validateCells = (cells: unknown): Cell[] | null => {
       siteId: raw.siteId.trim(),
       tech: raw.tech.trim(),
       band: isString(raw.band) ? raw.band.trim() : undefined,
+      bandNum: isNumber(raw.bandNum) ? raw.bandNum : undefined,
+      bwMhz: isNumber(raw.bwMhz) ? raw.bwMhz : undefined,
       vendor: isString(raw.vendor) ? raw.vendor.trim() : undefined,
       hBeamwidth: isNumber(raw.hBeamwidth) ? raw.hBeamwidth : undefined,
       earfcn: isNumber(raw.earfcn) ? raw.earfcn : undefined,
       pci: isNumber(raw.pci) ? raw.pci : undefined,
       azimuth: isNumber(raw.azimuth) ? raw.azimuth : undefined,
       tilt: isNumber(raw.tilt) ? raw.tilt : undefined,
+      prbHistogram: Array.isArray(raw.prbHistogram) ? raw.prbHistogram as number[][] : undefined,
+      kpi: isRecord(raw.kpi) ? raw.kpi as CellKPI : undefined,
+      cm: isRecord(raw.cm) ? raw.cm as CellCM : undefined,
     })
   }
   return validated

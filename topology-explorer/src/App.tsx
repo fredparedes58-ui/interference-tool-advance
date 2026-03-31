@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
@@ -12,10 +12,9 @@ import { buildSourceHeatmap } from './interference'
 import type { NormalizedTopology, Site, Tech } from './types'
 import type { InterferenceSample } from './types'
 
-console.log('App component loading...')
-
 const TECH_OPTIONS: Tech[] = ['LTE', 'NR', 'WCDMA', 'GSM']
 const STORAGE_KEY = 'topology-explorer-state'
+const MAX_DISPLAY_CELLS = 3000
 const DEFAULT_GRID_STEP = 0.08
 const DEFAULT_BASE_WEIGHT = 0.06
 const PRESETS = {
@@ -223,8 +222,6 @@ function App() {
     }
   }, [])
 
-  console.log('App component initialized, topology:', topology)
-
   // Initialize enabledLinkIds when topology changes
   useEffect(() => {
     setEnabledLinkIds(new Set(topology.links.map(l => l.id)))
@@ -238,9 +235,11 @@ function App() {
         const data = (await response.json()) as unknown
         const normalized = normalizeTopology(data)
         if (normalized.ok) {
-          setTopology(normalized.data)
-          setTopologyKey('topology.json')
-          setPendingAutoApply(true)
+          startTransition(() => {
+            setTopology(normalized.data)
+            setTopologyKey('topology.json')
+            setPendingAutoApply(true)
+          })
         }
       } catch {
         // ignore if not available
@@ -385,19 +384,21 @@ function App() {
   // Auto-apply: when a new topology is loaded, show all data immediately
   useEffect(() => {
     if (!pendingAutoApply || availableBands.length === 0) return
-    setPendingAutoApply(false)
     const allBands: Record<string, boolean> = {}
     availableBands.forEach((b) => { allBands[b] = true })
     const allTechs: Record<string, boolean> = {}
     TECH_OPTIONS.forEach((t) => { allTechs[t] = true })
-    setTechFilters(allTechs)
-    setBandFilters(allBands)
-    setAppliedSearch('')
-    setAppliedTechFilters(allTechs)
-    setAppliedBandFilters(allBands)
-    setAppliedVendorFilters({})
-    setAppliedRegionFilters({})
-    setAppliedOnce(true)
+    startTransition(() => {
+      setPendingAutoApply(false)
+      setTechFilters(allTechs)
+      setBandFilters(allBands)
+      setAppliedSearch('')
+      setAppliedTechFilters(allTechs)
+      setAppliedBandFilters(allBands)
+      setAppliedVendorFilters({})
+      setAppliedRegionFilters({})
+      setAppliedOnce(true)
+    })
   }, [pendingAutoApply, availableBands])
 
   const enabledBands = useMemo(
@@ -544,10 +545,10 @@ function App() {
 
   const displayCells = useMemo(() => {
     if (selectedSiteId) return selectedCells
-    return filteredCells
+    return filteredCells.slice(0, MAX_DISPLAY_CELLS)
   }, [filteredCells, selectedCells, selectedSiteId])
 
-  const cellRenderWarning = false
+  const cellRenderWarning = !selectedSiteId && filteredCells.length > MAX_DISPLAY_CELLS
 
   const onToggleTech = (tech: Tech) => {
     setTechFilters((prev) => ({ ...prev, [tech]: !prev[tech] }))
@@ -646,11 +647,13 @@ function App() {
         setUploadError(normalized.error)
         return
       }
-      setTopology(normalized.data)
-      setSelectedSiteId(null)
-      setSearch('')
-      setTopologyKey(file.name)
-      setPendingAutoApply(true)
+      startTransition(() => {
+        setTopology(normalized.data)
+        setSelectedSiteId(null)
+        setSearch('')
+        setTopologyKey(file.name)
+        setPendingAutoApply(true)
+      })
     } catch (err) {
       setUploadError('El archivo no es un JSON valido.')
     }
@@ -1002,8 +1005,6 @@ function App() {
   const currentMapStyle = useMemo(() => {
     return MAP_STYLES.find((style) => style.id === mapStyleId) ?? MAP_STYLES[0]
   }, [mapStyleId])
-
-  console.log('App component rendering...')
 
   return (
     <div className="app-shell futuristic">

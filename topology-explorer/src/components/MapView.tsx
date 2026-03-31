@@ -154,19 +154,25 @@ const MapView = ({
     ]
   }, [bands, bandPalette, selectedSiteId])
 
+  const showSectors = zoomLevel >= 9
+
+  // Only compute sector polygons when zoomed in to avoid heavy computation at national view
   const cellsGeojson = useMemo(
     () =>
-      cellsToSectorsGeoJSON(
-        cells,
-        siteById,
-        800,
-        bandRadius,
-        (cell, bandR) => {
-          const jitter = 0.7 + hash01(cell.id) * 0.6 // 0.7x .. 1.3x
-          return bandR * jitter
-        }
-      ),
-    [cells, siteById, bandRadius]
+      showSectors
+        ? cellsToSectorsGeoJSON(
+            cells,
+            siteById,
+            800,
+            bandRadius,
+            (cell, bandR) => {
+              const jitter = 0.7 + hash01(cell.id) * 0.6
+              return bandR * jitter
+            }
+          )
+        : { type: 'FeatureCollection' as const, features: [] },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cells, siteById, bandRadius, showSectors]
   )
 
   const cellsCenterGeojson = useMemo(() => ({
@@ -577,27 +583,33 @@ const MapView = ({
         }
       })
 
+      let zoomDebounceTimer: ReturnType<typeof setTimeout> | null = null
       const updateViewMetrics = () => {
-        const currentZoom = map.getZoom()
-        setZoomLevel(currentZoom)
+        if (zoomDebounceTimer) clearTimeout(zoomDebounceTimer)
+        zoomDebounceTimer = setTimeout(() => {
+          const currentZoom = map.getZoom()
+          setZoomLevel(currentZoom)
 
-        // densidad: cuántos sitios hay en viewport, para encoger cuando hay muchos
-        const bounds = map.getBounds()
-        const visibleSites = sites.filter(
-          (s) =>
-            s.lon >= bounds.getWest() &&
-            s.lon <= bounds.getEast() &&
-            s.lat >= bounds.getSouth() &&
-            s.lat <= bounds.getNorth()
-        ).length
-        // fórmula simple: factor ~ sqrt(60 / N), limitado
-        const factor = clamp(Math.sqrt(60 / (visibleSites + 1)), 0.2, 1)
-        setDensityFactor(factor)
+          // densidad: cuántos sitios hay en viewport, para encoger cuando hay muchos
+          const bounds = map.getBounds()
+          const visibleSites = sites.filter(
+            (s) =>
+              s.lon >= bounds.getWest() &&
+              s.lon <= bounds.getEast() &&
+              s.lat >= bounds.getSouth() &&
+              s.lat <= bounds.getNorth()
+          ).length
+          // fórmula simple: factor ~ sqrt(60 / N), limitado
+          const factor = clamp(Math.sqrt(60 / (visibleSites + 1)), 0.2, 1)
+          setDensityFactor(factor)
+        }, 150)
       }
 
       map.on('zoom', updateViewMetrics)
       map.on('moveend', updateViewMetrics)
-      updateViewMetrics()
+      // Initial metrics without debounce
+      const initialZoom = map.getZoom()
+      setZoomLevel(initialZoom)
     })
 
     const loggedErrors = new Set<string>()
