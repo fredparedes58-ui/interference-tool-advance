@@ -1535,6 +1535,97 @@ tbody tr.active {
 .chatbot-send:not(:disabled):hover { transform: scale(1.1); }
 .chatbot-send .material-icons-round { font-size: 1rem; }
 
+/* ── RAG context bar ─────────────────────────────── */
+.chatbot-rag-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(0,0,0,0.15);
+  flex-shrink: 0;
+}
+.chatbot-rag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  flex: 1;
+}
+.rag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.rag-chip--green  { color: #4ade80; border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); }
+.rag-chip--blue   { color: #60a5fa; border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.08); }
+.rag-chip--violet { color: #c4b5fd; border-color: rgba(196,181,253,0.35); background: rgba(196,181,253,0.08); }
+.rag-chip--dim    { color: #475569; border-color: rgba(71,85,105,0.3);    background: transparent; font-style: italic; text-transform: none; letter-spacing: 0; }
+.chatbot-upload-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #94a3b8;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.chatbot-upload-btn:hover { background: rgba(0,245,212,0.12); color: var(--c-accent); border-color: rgba(0,245,212,0.3); }
+
+/* ── FAB dot (context active indicator) ─────────── */
+.chatbot-fab-dot {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  border: 2px solid rgba(6,7,26,0.9);
+  box-shadow: 0 0 8px var(--c-glow);
+}
+
+/* ── Docs list ───────────────────────────────────── */
+.chatbot-docs-list {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(0,0,0,0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.chatbot-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: #c4b5fd;
+}
+.chatbot-doc-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chatbot-doc-remove {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  border-radius: 3px;
+}
+.chatbot-doc-remove:hover { color: #f87171; background: rgba(239,68,68,0.1); }
+
 /* ============================================================
    Bottom Nav — 6-column variant
    ============================================================ */

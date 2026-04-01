@@ -6,6 +6,7 @@ import CellAnalysisPanel from './components/CellAnalysisPanel'
 import KPIPanel from './components/KPIPanel'
 import type { KpiDataset } from './components/KPIPanel'
 import ChatBot from './components/ChatBot'
+import type { ChatBotContext } from './components/ChatBot'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
@@ -1035,6 +1036,78 @@ function App() {
     return MAP_STYLES.find((style) => style.id === mapStyleId) ?? MAP_STYLES[0]
   }, [mapStyleId])
 
+  // ── RAG context for Hunter chatbot ──────────────────────────
+  const chatbotContext = useMemo<ChatBotContext>(() => {
+    // 1. Topology summary
+    let topology: string | null = null
+    if (hasDataGate && filteredSites.length > 0) {
+      const lines = [
+        `Sites: ${filteredSites.length} | Celdas: ${filteredCells.length}`,
+        `Bandas activas: ${appliedEnabledBands.join(', ') || 'todas'}`,
+      ]
+      if (interferenceIssues.length > 0) {
+        lines.push(`\nTop alertas de interferencia:`)
+        interferenceIssues.slice(0, 6).forEach(issue => {
+          lines.push(`  • ${issue.cellId} (${issue.siteName}, ${issue.region}): ${issue.issueType} — Score ${(issue.score * 100).toFixed(0)}%`)
+        })
+      } else {
+        lines.push('Sin alertas de interferencia activas.')
+      }
+      topology = lines.join('\n')
+    }
+
+    // 2. Selected cell summary
+    let selectedCellCtx: string | null = null
+    if (selectedCellId) {
+      const realCell = filteredCells.find(c => c.id === selectedCellId)
+        ?? uniqueCells.find(c => c.id === selectedCellId)
+        ?? null
+      if (realCell) {
+        const site = siteById.get(realCell.siteId)
+        selectedCellCtx = [
+          `Celda: ${realCell.id}`,
+          `Sitio: ${site?.name ?? realCell.siteId} (${site?.region ?? ''})`,
+          `Tech: ${realCell.tech} | Banda: ${realCell.band ?? 'N/A'} | Vendor: ${realCell.vendor ?? 'N/A'}`,
+          `Azimuth: ${realCell.azimuth ?? 'N/A'}° | Tilt: ${realCell.tilt ?? 'N/A'}°`,
+          realCell.prbHistogram
+            ? `PRB Histogram disponible: ${realCell.prbHistogram.length} PRBs × 24h`
+            : 'PRB Histogram: no disponible',
+        ].join('\n')
+      } else {
+        selectedCellCtx = `Celda seleccionada: ${selectedCellId}`
+      }
+    }
+
+    // 3. KPI summary for selected cell
+    let kpis: string | null = null
+    if (selectedCellId && kpiData) {
+      const cellKpi = kpiData.kpis[selectedCellId]
+      if (cellKpi) {
+        const dates = [...new Set(cellKpi.hourly.map(r => r.date as string))].sort()
+        const lastDate = dates[dates.length - 1]
+        const dayRows = cellKpi.hourly.filter(r => r.date === lastDate)
+        const avgKpi = (key: string) => {
+          const vals = dayRows.map(r => r[key] as number | null).filter(v => v != null) as number[]
+          return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : 'N/A'
+        }
+        kpis = [
+          `Celda: ${selectedCellId} | Fecha: ${lastDate}`,
+          `Disponibilidad: ${avgKpi('cell_avail')}%`,
+          `ERAB Accesibilidad: ${avgKpi('erab_access')}%`,
+          `PRB DL utilización: ${avgKpi('prb_dl')}%`,
+          `DL Throughput: ${avgKpi('dl_tput_mbps')} Mbps`,
+          `PDCCH utilización: ${avgKpi('pdcch_util')}%`,
+          `Usuarios RRC: ${avgKpi('rrc_users')}`,
+        ].join('\n')
+      }
+    }
+
+    return { topology, selectedCell: selectedCellCtx, kpis }
+  }, [
+    hasDataGate, filteredSites, filteredCells, appliedEnabledBands,
+    interferenceIssues, selectedCellId, siteById, kpiData,
+  ])
+
   return (
     <div className="app-shell futuristic">
       <div className="map-stage">
@@ -1297,7 +1370,7 @@ function App() {
         </section>
       )}
 
-      <ChatBot />
+      <ChatBot ragContext={chatbotContext} />
 
       {/* Hidden file input — triggered by the + button */}
       <input

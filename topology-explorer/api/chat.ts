@@ -302,6 +302,36 @@ Las firmas están basadas en 130+ informes de campo reales (Argentina/España):
 - No inventes feature IDs de Ericsson que no conoces — di que no tienes esa info
 - Mantén el contexto de la conversación`
 
+type RagContext = {
+  topology?: string | null
+  selectedCell?: string | null
+  kpis?: string | null
+  docs?: Array<{ name: string; text: string }>
+}
+
+function buildContextBlock(ctx: RagContext): string {
+  const parts: string[] = []
+
+  if (ctx.topology) {
+    parts.push(`## DATOS DE RED CARGADOS EN LA APP\n${ctx.topology}`)
+  }
+  if (ctx.selectedCell) {
+    parts.push(`## CELDA SELECCIONADA ACTUALMENTE\n${ctx.selectedCell}`)
+  }
+  if (ctx.kpis) {
+    parts.push(`## KPIs HORARIOS DE LA CELDA SELECCIONADA\n${ctx.kpis}`)
+  }
+  if (ctx.docs && ctx.docs.length > 0) {
+    const docBlock = ctx.docs
+      .map((d, i) => `### Documento ${i + 1}: ${d.name}\n${d.text.slice(0, 6000)}`)
+      .join('\n\n')
+    parts.push(`## DOCUMENTOS DE REFERENCIA CARGADOS POR EL USUARIO\n${docBlock}`)
+  }
+
+  if (parts.length === 0) return ''
+  return '\n\n---\n\n# CONTEXTO EN TIEMPO REAL\n\n' + parts.join('\n\n')
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -326,16 +356,21 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const { messages } = (await req.json()) as {
+    const body = (await req.json()) as {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
+      context?: RagContext
     }
+
+    const { messages, context } = body
+    const contextBlock = context ? buildContextBlock(context) : ''
+    const systemWithContext = SYSTEM_PROMPT + contextBlock
 
     const client = new Anthropic({ apiKey })
 
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      max_tokens: 1200,
+      system: systemWithContext,
       messages,
     })
 
