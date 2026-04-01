@@ -42,6 +42,7 @@ type MapViewProps = {
   zoomToSelectedSignal: number
   sourceHeatmapGeoJSON?: SourceHeatmapGeoJSON
   kpiColorMap?: Map<string, string>
+  onBoundsChange?: (bbox: [number, number, number, number]) => void
 }
 
 const REMOTE_STYLE = 'https://demotiles.maplibre.org/style.json'
@@ -87,6 +88,7 @@ const MapView = ({
   zoomToSelectedSignal,
   sourceHeatmapGeoJSON,
   kpiColorMap,
+  onBoundsChange,
 }: MapViewProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -625,6 +627,11 @@ const MapView = ({
 
       map.on('zoom', updateViewMetrics)
       map.on('moveend', updateViewMetrics)
+      map.on('moveend', () => {
+        if (!onBoundsChange) return
+        const b = map.getBounds()
+        onBoundsChange([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()])
+      })
       // Initial metrics without debounce
       const initialZoom = map.getZoom()
       setZoomLevel(initialZoom)

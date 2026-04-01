@@ -8,6 +8,7 @@ import KPIPanel from './components/KPIPanel'
 import type { KpiDataset } from './components/KPIPanel'
 import ChatBot from './components/ChatBot'
 import type { ChatBotContext } from './components/ChatBot'
+import OnboardingGuide from './components/OnboardingGuide'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
@@ -16,6 +17,7 @@ import { buildSourceHeatmap } from './interference'
 import type { NormalizedTopology, Site, Tech } from './types'
 import type { InterferenceSample } from './types'
 import { buildKpiColorMap } from './utils/kpiColor'
+import type { MapBbox } from './hooks/useViewportTopology'
 
 const TECH_OPTIONS: Tech[] = ['LTE', 'NR', 'WCDMA', 'GSM']
 const STORAGE_KEY = 'topology-explorer-state'
@@ -135,6 +137,7 @@ function App() {
   const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
   const [kpiColorKpi, setKpiColorKpi] = useState<string | null>(null)
   const [showCompare, setShowCompare] = useState(false)
+  const [mapBounds, setMapBounds] = useState<MapBbox | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const kpiFileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
@@ -568,8 +571,21 @@ function App() {
 
   const displayCells = useMemo(() => {
     if (selectedSiteId) return selectedCells
+    // Viewport lazy loading: when topology is large, prioritise cells in current map view
+    if (mapBounds && filteredCells.length > MAX_DISPLAY_CELLS) {
+      const [w, s, e, n] = mapBounds
+      const dLon = (e - w) * 0.15
+      const dLat = (n - s) * 0.15
+      const inView = filteredCells.filter(cell => {
+        const site = siteById.get(cell.siteId)
+        if (!site) return false
+        return site.lon >= w - dLon && site.lon <= e + dLon &&
+               site.lat >= s - dLat && site.lat <= n + dLat
+      })
+      if (inView.length > 0) return inView.slice(0, MAX_DISPLAY_CELLS)
+    }
     return filteredCells.slice(0, MAX_DISPLAY_CELLS)
-  }, [filteredCells, selectedCells, selectedSiteId])
+  }, [filteredCells, selectedCells, selectedSiteId, mapBounds, siteById])
 
   const cellRenderWarning = !selectedSiteId && filteredCells.length > MAX_DISPLAY_CELLS
 
@@ -1144,6 +1160,7 @@ function App() {
           hotspotAreas={hotspotAreas}
           sourceHeatmapGeoJSON={sourceHeatmapGeoJSON}
           kpiColorMap={kpiColorMap}
+          onBoundsChange={setMapBounds}
         />
       </div>
 
@@ -1417,6 +1434,7 @@ function App() {
       )}
 
       <ChatBot ragContext={chatbotContext} />
+      <OnboardingGuide />
 
       {/* Hidden file input — triggered by the + button */}
       <input
