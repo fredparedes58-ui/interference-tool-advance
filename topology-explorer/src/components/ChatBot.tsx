@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 
+const HISTORY_KEY = 'hunter-chat-history'
+const MAX_STORED = 10 // max conversations stored
+
 type Message = {
   id: number
   role: 'user' | 'assistant'
   content: string
+}
+
+type StoredConversation = {
+  id: string
+  title: string
+  messages: Message[]
+  savedAt: string
 }
 
 type RagDoc = {
@@ -57,6 +67,17 @@ async function extractText(file: File): Promise<string> {
   return text.slice(0, 8000)
 }
 
+function loadHistory(): StoredConversation[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    return raw ? (JSON.parse(raw) as StoredConversation[]) : []
+  } catch { return [] }
+}
+
+function saveHistory(convs: StoredConversation[]) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(convs.slice(0, MAX_STORED))) } catch { /* ignore */ }
+}
+
 export default function ChatBot({ ragContext }: Props) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([WELCOME])
@@ -65,10 +86,13 @@ export default function ChatBot({ ragContext }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [docsOpen, setDocsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<StoredConversation[]>(loadHistory)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(1)
+  const currentConvId = useRef<string>(Date.now().toString())
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 100)
@@ -76,6 +100,25 @@ export default function ChatBot({ ragContext }: Props) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  // Auto-save conversation when there are user messages
+  useEffect(() => {
+    const userMsgs = messages.filter(m => m.role === 'user')
+    if (userMsgs.length === 0 || loading) return
+    const title = userMsgs[0].content.slice(0, 60) + (userMsgs[0].content.length > 60 ? '…' : '')
+    const conv: StoredConversation = {
+      id: currentConvId.current,
+      title,
+      messages,
+      savedAt: new Date().toISOString(),
+    }
+    setHistory(prev => {
+      const filtered = prev.filter(c => c.id !== conv.id)
+      const next = [conv, ...filtered]
+      saveHistory(next)
+      return next
+    })
   }, [messages, loading])
 
   const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -206,10 +249,75 @@ export default function ChatBot({ ragContext }: Props) {
               <div className="chatbot-title">Hunter</div>
               <div className="chatbot-subtitle">RF Analyst · RAG activo</div>
             </div>
-            <button className="chatbot-close" onClick={() => setOpen(false)}>
-              <span className="material-icons-round">close</span>
-            </button>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <button
+                className="chatbot-history-btn"
+                onClick={() => setHistoryOpen(v => !v)}
+                title="Historial de conversaciones"
+              >
+                <span className="material-icons-round" style={{ fontSize: 16 }}>history</span>
+                {history.length > 0 && <span className="chatbot-history-count">{history.length}</span>}
+              </button>
+              <button
+                className="chatbot-new-btn"
+                onClick={() => {
+                  currentConvId.current = Date.now().toString()
+                  setMessages([WELCOME])
+                  setInput('')
+                  setError(null)
+                  setHistoryOpen(false)
+                  nextId.current = 1
+                }}
+                title="Nueva conversación"
+              >
+                <span className="material-icons-round" style={{ fontSize: 16 }}>add_comment</span>
+              </button>
+              <button className="chatbot-close" onClick={() => setOpen(false)}>
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
           </div>
+
+          {/* History panel */}
+          {historyOpen && (
+            <div className="chatbot-history-panel">
+              <div className="chatbot-history-title">Conversaciones guardadas</div>
+              {history.length === 0 ? (
+                <div className="chatbot-history-empty">Sin conversaciones guardadas</div>
+              ) : (
+                history.map(conv => (
+                  <div
+                    key={conv.id}
+                    className={`chatbot-history-item ${conv.id === currentConvId.current ? 'chatbot-history-item--active' : ''}`}
+                    onClick={() => {
+                      currentConvId.current = conv.id
+                      setMessages(conv.messages)
+                      nextId.current = Math.max(...conv.messages.map(m => m.id)) + 1
+                      setHistoryOpen(false)
+                    }}
+                  >
+                    <span className="material-icons-round" style={{ fontSize: 14, flexShrink: 0, opacity: 0.5 }}>chat</span>
+                    <div className="chatbot-history-item-text">
+                      <div className="chatbot-history-item-title">{conv.title}</div>
+                      <div className="chatbot-history-item-date">{conv.savedAt.slice(0, 10)}</div>
+                    </div>
+                    <button
+                      className="chatbot-history-delete"
+                      onClick={e => {
+                        e.stopPropagation()
+                        setHistory(prev => {
+                          const next = prev.filter(c => c.id !== conv.id)
+                          saveHistory(next)
+                          return next
+                        })
+                      }}
+                      title="Eliminar"
+                    >✕</button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
 
           {/* RAG context bar */}
           <div className="chatbot-rag-bar">

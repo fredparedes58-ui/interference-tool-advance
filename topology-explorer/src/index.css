@@ -1833,6 +1833,92 @@ tbody tr.active {
 }
 .chatbot-doc-remove:hover { color: #f87171; background: rgba(239,68,68,0.1); }
 
+/* ── Chat history controls ──────────────────────────────── */
+.chatbot-history-btn,
+.chatbot-new-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #94a3b8;
+  border-radius: 6px;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  cursor: pointer; position: relative;
+}
+.chatbot-history-btn:hover,
+.chatbot-new-btn:hover { color: var(--c-accent); border-color: rgba(0,245,212,0.3); }
+
+.chatbot-history-count {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--c-accent2);
+  color: #06071a;
+  font-size: 9px; font-weight: 800;
+  border-radius: 99px;
+  min-width: 14px; height: 14px;
+  display: grid; place-items: center;
+  padding: 0 2px;
+}
+
+.chatbot-history-panel {
+  background: rgba(10, 14, 40, 0.96);
+  border-bottom: 1px solid rgba(129,140,248,0.15);
+  max-height: 220px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.chatbot-history-panel::-webkit-scrollbar { width: 3px; }
+.chatbot-history-panel::-webkit-scrollbar-thumb { background: rgba(129,140,248,0.2); border-radius: 99px; }
+
+.chatbot-history-title {
+  font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.15em;
+  color: #475569; padding: 8px 12px 4px;
+}
+.chatbot-history-empty {
+  font-size: 0.78rem; color: #475569; padding: 8px 12px 12px;
+}
+.chatbot-history-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.12s;
+}
+.chatbot-history-item:hover { background: rgba(129,140,248,0.08); }
+.chatbot-history-item--active { background: rgba(0,245,212,0.06); }
+
+.chatbot-history-item-text { flex: 1; min-width: 0; }
+.chatbot-history-item-title {
+  font-size: 0.78rem; color: #c7d2fe;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chatbot-history-item-date { font-size: 0.65rem; color: #475569; margin-top: 1px; }
+
+.chatbot-history-delete {
+  background: transparent; border: none; color: #475569;
+  cursor: pointer; font-size: 11px; flex-shrink: 0; padding: 2px 4px;
+  border-radius: 3px;
+}
+.chatbot-history-delete:hover { color: #f87171; background: rgba(239,68,68,0.1); }
+
+/* ── KPI multi-date delta bar ────────────────────────────── */
+.kpi-date-compare-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: rgba(129,140,248,0.06);
+  border: 1px solid rgba(129,140,248,0.18);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.kpi-date-compare-label {
+  font-size: 0.72rem; color: #64748b; white-space: nowrap; font-weight: 600;
+}
+.kpi-date-delta-chip {
+  font-size: 0.72rem; font-weight: 700;
+  background: rgba(15,23,42,0.6);
+  border-radius: 99px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
 /* ============================================================
    KPI Color Map overlay selector
    ============================================================ */

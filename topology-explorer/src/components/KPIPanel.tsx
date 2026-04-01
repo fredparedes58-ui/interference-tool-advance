@@ -75,6 +75,7 @@ export default function KPIPanel({ kpiData, selectedCellId, cellPrbHistogram, on
     new Set(['cell_avail', 'erab_access', 'prb_dl', 'dl_tput_mbps'])
   )
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [compareDate, setCompareDate] = useState<string | null>(null)
 
   const cellId = activeCellId ?? selectedCellId ?? null
 
@@ -89,26 +90,35 @@ export default function KPIPanel({ kpiData, selectedCellId, cellPrbHistogram, on
     return d
   }, [cellData])
 
-  // Auto-select first date
-  const currentDate = selectedDate ?? dates[0] ?? null
+  // Auto-select last date (most recent)
+  const currentDate = selectedDate ?? dates[dates.length - 1] ?? null
 
-  // Filter rows by date + build chart data
+  // Filter rows by date + build chart data (merged with compare date)
   const chartData = useMemo(() => {
     if (!cellData || !currentDate) return []
     const rows = cellData.hourly.filter(r => r.date === currentDate)
+    const cmpRows = compareDate
+      ? cellData.hourly.filter(r => r.date === compareDate)
+      : []
+    // Index compare rows by hora for fast lookup
+    const cmpByHora = new Map(cmpRows.map(r => [r.hora as string, r]))
     const prbByHour = avgPrbByHour(cellPrbHistogram ?? [])
     return rows.map((r) => {
       const entry: Record<string, unknown> = { hora: r.hora }
+      const cmp = cmpByHora.get(r.hora as string)
       for (const m of meta) {
         const v = r[m.key]
         entry[m.key] = v != null ? Number(v) : null
+        if (compareDate && cmp) {
+          const cv = cmp[m.key]
+          entry[`${m.key}__cmp`] = cv != null ? Number(cv) : null
+        }
       }
-      // PRB interference (from histogram if available, else null)
       const hour = parseInt(String(r.hora).split(':')[0] ?? '0')
       entry['prb_interference'] = prbByHour[hour] ?? null
       return entry
     })
-  }, [cellData, currentDate, cellPrbHistogram, meta])
+  }, [cellData, currentDate, compareDate, cellPrbHistogram, meta])
 
   // Summary stats per KPI (avg of current date)
   const summaryStats = useMemo(() => {
@@ -183,8 +193,19 @@ export default function KPIPanel({ kpiData, selectedCellId, cellPrbHistogram, on
         {dates.length > 1 && (
           <>
             <label>Fecha:</label>
-            <select value={currentDate ?? ''} onChange={e => setSelectedDate(e.target.value)}>
+            <select value={currentDate ?? ''} onChange={e => { setSelectedDate(e.target.value); setCompareDate(null) }}>
               {dates.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <label style={{ color: '#818cf8' }}>vs:</label>
+            <select
+              value={compareDate ?? ''}
+              onChange={e => setCompareDate(e.target.value || null)}
+              style={{ borderColor: compareDate ? 'rgba(129,140,248,0.5)' : undefined }}
+            >
+              <option value="">— sin comparar —</option>
+              {dates.filter(d => d !== currentDate).map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
             </select>
           </>
         )}
@@ -261,18 +282,35 @@ export default function KPIPanel({ kpiData, selectedCellId, cellPrbHistogram, on
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
 
-                {/* KPI lines */}
+                {/* KPI lines — primary date */}
                 {meta.map((m, i) => selectedKpis.has(m.key) && (
                   <Line
                     key={m.key}
                     yAxisId="kpi"
                     type="monotone"
                     dataKey={m.key}
-                    name={m.label}
+                    name={`${m.label}${compareDate ? ` (${currentDate})` : ''}`}
                     stroke={KPI_COLORS[i % KPI_COLORS.length]}
                     strokeWidth={2}
                     dot={false}
                     connectNulls
+                  />
+                ))}
+
+                {/* KPI lines — compare date (dashed) */}
+                {compareDate && meta.map((m, i) => selectedKpis.has(m.key) && (
+                  <Line
+                    key={`${m.key}__cmp`}
+                    yAxisId="kpi"
+                    type="monotone"
+                    dataKey={`${m.key}__cmp`}
+                    name={`${m.label} (${compareDate})`}
+                    stroke={KPI_COLORS[i % KPI_COLORS.length]}
+                    strokeWidth={1.5}
+                    strokeDasharray="5 3"
+                    dot={false}
+                    connectNulls
+                    opacity={0.65}
                   />
                 ))}
 
@@ -302,6 +340,33 @@ export default function KPIPanel({ kpiData, selectedCellId, cellPrbHistogram, on
               </ComposedChart>
             </ResponsiveContainer>
           </div>
+
+          {/* Multi-date delta summary */}
+          {compareDate && (
+            <div className="kpi-date-compare-bar">
+              <span className="kpi-date-compare-label">
+                <span style={{ color: 'var(--c-accent2)' }}>Δ</span> {compareDate} → {currentDate}:
+              </span>
+              {meta.filter(m => selectedKpis.has(m.key)).map(m => {
+                const curr = summaryStats[m.key]
+                const cmpVals = chartData.map(r => r[`${m.key}__cmp`] as number | null).filter(v => v != null) as number[]
+                const cmpAvg = cmpVals.length ? Math.round(cmpVals.reduce((a,b) => a+b,0) / cmpVals.length * 100) / 100 : null
+                if (curr == null || cmpAvg == null) return null
+                const delta = curr - cmpAvg
+                const improved = m.good_direction === 'high' ? delta > 0 : delta < 0
+                const sign = delta > 0 ? '+' : ''
+                return (
+                  <span
+                    key={m.key}
+                    className="kpi-date-delta-chip"
+                    style={{ color: Math.abs(delta) < 0.01 ? '#94a3b8' : improved ? '#22c55e' : '#ef4444' }}
+                  >
+                    {m.label}: {sign}{delta.toFixed(1)}{m.unit}
+                  </span>
+                )
+              })}
+            </div>
+          )}
 
           {/* KPI status cards */}
           <div className="kpi-cards">
