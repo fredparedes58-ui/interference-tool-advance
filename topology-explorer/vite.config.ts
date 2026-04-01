@@ -78,6 +78,7 @@ export default defineConfig({
           'vendor-react':   ['react', 'react-dom', 'react-is'],
           'vendor-map':     ['maplibre-gl'],
           'vendor-charts':  ['recharts'],
+          'vendor-pdf':     ['jspdf'],
         },
       },
     },

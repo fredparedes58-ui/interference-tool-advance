@@ -3,6 +3,7 @@ import MapView from './components/MapView'
 import Sidebar from './components/Sidebar'
 import SiteDrawer from './components/SiteDrawer'
 import CellAnalysisPanel from './components/CellAnalysisPanel'
+import ComparePanel from './components/ComparePanel'
 import KPIPanel from './components/KPIPanel'
 import type { KpiDataset } from './components/KPIPanel'
 import ChatBot from './components/ChatBot'
@@ -133,6 +134,7 @@ function App() {
   const [pendingAutoApply, setPendingAutoApply] = useState(false)
   const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
   const [kpiColorKpi, setKpiColorKpi] = useState<string | null>(null)
+  const [showCompare, setShowCompare] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const kpiFileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
@@ -1388,7 +1390,17 @@ function App() {
           cell={selectedCell}
           analysis={cellAnalysis}
           allCells={topology.cells}
-          onClose={() => setSelectedCellId(null)}
+          onClose={() => { setSelectedCellId(null); setShowCompare(false) }}
+          onCompare={() => setShowCompare(v => !v)}
+        />
+      )}
+
+      {showCompare && selectedCell && (
+        <ComparePanel
+          cellA={selectedCell}
+          allCells={topology.cells}
+          kpiData={kpiData}
+          onClose={() => setShowCompare(false)}
         />
       )}
 

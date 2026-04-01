@@ -11,12 +11,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Cell, CellAnalysis, MitigationAction, SourceMatch } from '../types'
+import { exportCellPdf } from '../utils/pdfReport'
 
 type Props = {
   cell: Cell
   analysis: CellAnalysis | null
   allCells: Cell[]
   onClose: () => void
+  onCompare?: () => void
 }
 
 // ---- colour helpers ---------------------------------------------------------
@@ -105,13 +107,16 @@ function parseRgb(s: string): [number, number, number] {
 function PrbHeatmap({
   histogram,
   histogramPrev,
+  externalRef,
 }: {
   histogram: number[][]
   histogramPrev?: number[][]
+  externalRef?: React.RefObject<HTMLCanvasElement | null>
 }) {
   const [mode, setMode] = useState<HeatmapMode>('current')
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const internalRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef = externalRef ?? internalRef
 
   const N = histogram.length
   const CELL_W = Math.max(2, Math.floor(360 / 24))
@@ -432,11 +437,12 @@ function FeatureRow({ label, value, unit = '' }: { label: string; value: number;
 
 // ---- Main panel ------------------------------------------------------------
 
-export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }: Props) {
+export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, onCompare }: Props) {
   const [expandedAction, setExpandedAction] = useState<string | null>(
     analysis?.mitigations[0]?.id ?? null
   )
   const [showFeatures, setShowFeatures] = useState(false)
+  const heatmapCanvasRef = useRef<HTMLCanvasElement>(null)
 
   // No PRB data available — show basic cell info panel
   if (!analysis) {
@@ -455,7 +461,19 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }:
               {cell.tilt !== undefined && ` · Tilt ${cell.tilt}°`}
             </div>
           </div>
-          <button className="cap-close-btn" onClick={onClose}>✕</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button className="cap-pdf-btn" onClick={() => exportCellPdf(cell, null, null)} title="Exportar PDF">
+              <span className="material-icons-round" style={{ fontSize: 13 }}>picture_as_pdf</span>
+              PDF
+            </button>
+            {onCompare && (
+              <button className="cap-compare-btn" onClick={onCompare} title="Comparar con otra celda">
+                <span className="material-icons-round" style={{ fontSize: 13 }}>compare</span>
+                Comparar
+              </button>
+            )}
+            <button className="cap-close-btn" onClick={onClose}>✕</button>
+          </div>
         </div>
         <div className="cap-body">
           <div className="cap-section">
@@ -525,7 +543,23 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }:
             </div>
           )}
         </div>
-        <button className="cap-close-btn" onClick={onClose}>✕</button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            className="cap-pdf-btn"
+            onClick={() => exportCellPdf(cell, analysis, heatmapCanvasRef.current)}
+            title="Exportar PDF"
+          >
+            <span className="material-icons-round" style={{ fontSize: 13 }}>picture_as_pdf</span>
+            PDF
+          </button>
+          {onCompare && (
+            <button className="cap-compare-btn" onClick={onCompare} title="Comparar con otra celda">
+              <span className="material-icons-round" style={{ fontSize: 13 }}>compare</span>
+              Comparar
+            </button>
+          )}
+          <button className="cap-close-btn" onClick={onClose}>✕</button>
+        </div>
       </div>
 
       <div className="cap-body">
@@ -581,6 +615,7 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose }:
             <PrbHeatmap
               histogram={cell.prbHistogram!}
               histogramPrev={cell.prbHistogramPrev}
+              externalRef={heatmapCanvasRef}
             />
           </div>
         )}
