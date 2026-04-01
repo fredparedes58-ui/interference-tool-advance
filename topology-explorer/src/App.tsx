@@ -14,6 +14,7 @@ import { analyzeCell } from './classify'
 import { buildSourceHeatmap } from './interference'
 import type { NormalizedTopology, Site, Tech } from './types'
 import type { InterferenceSample } from './types'
+import { buildKpiColorMap } from './utils/kpiColor'
 
 const TECH_OPTIONS: Tech[] = ['LTE', 'NR', 'WCDMA', 'GSM']
 const STORAGE_KEY = 'topology-explorer-state'
@@ -131,6 +132,7 @@ function App() {
   const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts' | 'kpi'>('map')
   const [pendingAutoApply, setPendingAutoApply] = useState(false)
   const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
+  const [kpiColorKpi, setKpiColorKpi] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const kpiFileInputRef = useRef<HTMLInputElement>(null)
   const [techFilters, setTechFilters] = useState<Record<string, boolean>>(() => {
@@ -1108,6 +1110,13 @@ function App() {
     interferenceIssues, selectedCellId, siteById, kpiData,
   ])
 
+  const kpiColorMap = useMemo(() => {
+    if (!kpiData || !kpiColorKpi) return undefined
+    const meta = kpiData.kpi_meta.find(m => m.key === kpiColorKpi)
+    if (!meta) return undefined
+    return buildKpiColorMap(kpiData.kpis, kpiColorKpi, meta, null)
+  }, [kpiData, kpiColorKpi])
+
   return (
     <div className="app-shell futuristic">
       <div className="map-stage">
@@ -1132,8 +1141,33 @@ function App() {
           backdrop={currentMapStyle.backdrop}
           hotspotAreas={hotspotAreas}
           sourceHeatmapGeoJSON={sourceHeatmapGeoJSON}
+          kpiColorMap={kpiColorMap}
         />
       </div>
+
+      {kpiData && (
+        <div className="kpi-color-overlay">
+          <span className="material-icons-round" style={{ fontSize: 14, opacity: 0.7 }}>palette</span>
+          <select
+            className="kpi-color-select"
+            value={kpiColorKpi ?? ''}
+            onChange={e => setKpiColorKpi(e.target.value || null)}
+            title="Colorear mapa por KPI"
+          >
+            <option value="">Band (default)</option>
+            {kpiData.kpi_meta.map(m => (
+              <option key={m.key} value={m.key}>{m.label}</option>
+            ))}
+          </select>
+          {kpiColorKpi && (
+            <div className="kpi-color-legend">
+              <span className="kpi-color-dot kpi-dot-green" />
+              <span className="kpi-color-dot kpi-dot-yellow" />
+              <span className="kpi-color-dot kpi-dot-red" />
+            </div>
+          )}
+        </div>
+      )}
 
       <header className="top-bar">
         <div>

@@ -3,7 +3,6 @@ import maplibregl from 'maplibre-gl'
 import { cellsToSectorsGeoJSON, linksToGeoJSON, sitesToGeoJSON } from '../geojson'
 import { buildInterferenceGrid } from '../interference'
 import type { Cell, InterferenceSample, Link, Site } from '../types'
-import type { Expression } from 'maplibre-gl'
 
 type SourceHeatmapGeoJSON = {
   type: 'FeatureCollection'
@@ -42,6 +41,7 @@ type MapViewProps = {
   onSelectHotspot?: (siteId: string) => void
   zoomToSelectedSignal: number
   sourceHeatmapGeoJSON?: SourceHeatmapGeoJSON
+  kpiColorMap?: Map<string, string>
 }
 
 const REMOTE_STYLE = 'https://demotiles.maplibre.org/style.json'
@@ -86,6 +86,7 @@ const MapView = ({
   onSelectHotspot,
   zoomToSelectedSignal,
   sourceHeatmapGeoJSON,
+  kpiColorMap,
 }: MapViewProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -142,38 +143,50 @@ const MapView = ({
   }, [bands, zoomLevel, densityFactor, sizeByBand])
 
   const bandFillExpression: any = useMemo(() => {
-    const pairs: (string | Expression)[] = ['Unknown', bandPalette.get('Unknown') ?? '#94a3b8']
+    const pairs: any[] = ['Unknown', bandPalette.get('Unknown') ?? '#94a3b8']
     bands.forEach((band) => {
       pairs.push(band, bandPalette.get(band) ?? '#94a3b8')
     })
+    const bandColor: any = ['match', ['get', 'band'], ...pairs, '#94a3b8']
+    // When kpiColor is set on a feature, use it; otherwise fall back to band color
+    const colorExpr: any = [
+      'case',
+      ['!=', ['coalesce', ['get', 'kpiColor'], ''], ''],
+      ['get', 'kpiColor'],
+      bandColor,
+    ]
     return [
       'case',
       ['==', ['get', 'siteId'], selectedSiteId ?? ''],
       '#f59e0b',
-      ['match', ['get', 'band'], ...pairs, '#94a3b8'],
+      colorExpr,
     ]
   }, [bands, bandPalette, selectedSiteId])
 
   const showSectors = zoomLevel >= 9
 
   // Only compute sector polygons when zoomed in to avoid heavy computation at national view
-  const cellsGeojson = useMemo(
-    () =>
-      showSectors
-        ? cellsToSectorsGeoJSON(
-            cells,
-            siteById,
-            800,
-            bandRadius,
-            (cell, bandR) => {
-              const jitter = 0.7 + hash01(cell.id) * 0.6
-              return bandR * jitter
-            }
-          )
-        : { type: 'FeatureCollection' as const, features: [] },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cells, siteById, bandRadius, showSectors]
-  )
+  const cellsGeojson = useMemo(() => {
+    if (!showSectors) return { type: 'FeatureCollection' as const, features: [] }
+    const base = cellsToSectorsGeoJSON(
+      cells,
+      siteById,
+      800,
+      bandRadius,
+      (cell, bandR) => {
+        const jitter = 0.7 + hash01(cell.id) * 0.6
+        return bandR * jitter
+      }
+    )
+    if (!kpiColorMap || kpiColorMap.size === 0) return base
+    return {
+      ...base,
+      features: base.features.map(f => ({
+        ...f,
+        properties: { ...f.properties, kpiColor: kpiColorMap.get(f.properties.id as string) ?? null },
+      })),
+    }
+  }, [cells, siteById, bandRadius, showSectors, kpiColorMap])
 
   const cellsCenterGeojson = useMemo(() => ({
     type: 'FeatureCollection' as const,
@@ -183,10 +196,15 @@ const MapView = ({
       return [{
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [site.lon, site.lat] as [number, number] },
-        properties: { id: cell.id, band: cell.band ?? 'Unknown', siteId: cell.siteId },
+        properties: {
+          id: cell.id,
+          band: cell.band ?? 'Unknown',
+          siteId: cell.siteId,
+          kpiColor: kpiColorMap?.get(cell.id) ?? null,
+        },
       }]
     }),
-  }), [cells, siteById])
+  }), [cells, siteById, kpiColorMap])
 
   const interferenceGeojson = useMemo(
     () =>

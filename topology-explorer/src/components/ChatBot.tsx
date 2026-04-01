@@ -122,16 +122,51 @@ export default function ChatBot({ ragContext }: Props) {
         }),
       })
 
-      const data = (await res.json()) as { reply?: string; error?: string }
-      if (!res.ok || data.error) {
-        setError(data.error ?? 'Error del servidor')
+      if (!res.ok || !res.body) {
+        setError('Error del servidor')
+        setLoading(false)
         return
       }
 
-      setMessages(prev => [
-        ...prev,
-        { id: nextId.current++, role: 'assistant', content: data.reply ?? '' },
-      ])
+      // Add empty assistant message to stream into
+      const assistantId = nextId.current++
+      setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') { setLoading(false); return }
+            try {
+              const parsed = JSON.parse(raw) as { delta?: string; error?: string }
+              if (parsed.error) { setError(parsed.error); setLoading(false); return }
+              if (parsed.delta) {
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === assistantId
+                      ? { ...m, content: m.content + parsed.delta }
+                      : m
+                  )
+                )
+              }
+            } catch { /* skip malformed line */ }
+          }
+        }
+        setLoading(false)
+      }
+
+      pump().catch(() => { setError('Error en streaming'); setLoading(false) })
+      return  // don't hit the finally block's setLoading — pump handles it
     } catch {
       setError('No se pudo conectar. Verifica tu conexión.')
     } finally {

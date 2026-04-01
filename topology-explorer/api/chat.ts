@@ -367,18 +367,41 @@ export default async function handler(req: Request): Promise<Response> {
 
     const client = new Anthropic({ apiKey })
 
-    const response = await client.messages.create({
+    const stream = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1200,
       system: systemWithContext,
       messages,
+      stream: true,
     })
 
-    const reply = (response.content[0] as { type: string; text: string }).text
+    const encoder = new TextEncoder()
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === 'content_block_delta' &&
+              event.delta.type === 'text_delta'
+            ) {
+              const chunk = JSON.stringify({ delta: event.delta.text })
+              controller.enqueue(encoder.encode(`data: ${chunk}\n\n`))
+            }
+          }
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Stream error'
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`))
+        } finally {
+          controller.close()
+        }
+      },
+    })
 
-    return new Response(JSON.stringify({ reply }), {
+    return new Response(readable, {
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
         'Access-Control-Allow-Origin': '*',
       },
     })

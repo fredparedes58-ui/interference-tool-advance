@@ -1627,6 +1627,59 @@ tbody tr.active {
 .chatbot-doc-remove:hover { color: #f87171; background: rgba(239,68,68,0.1); }
 
 /* ============================================================
+   KPI Color Map overlay selector
+   ============================================================ */
+.kpi-color-overlay {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 14, 40, 0.88);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 20px;
+  padding: 5px 12px 5px 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.45);
+}
+
+.kpi-color-select {
+  background: transparent;
+  border: none;
+  color: #c7d2fe;
+  font-size: 0.72rem;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  max-width: 160px;
+}
+
+.kpi-color-select option {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.kpi-color-legend {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.kpi-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.kpi-dot-green  { background: #22c55e; }
+.kpi-dot-yellow { background: #eab308; }
+.kpi-dot-red    { background: #ef4444; }
+
+/* ============================================================
    Bottom Nav — 6-column variant
    ============================================================ */
 .bottom-nav--6 {

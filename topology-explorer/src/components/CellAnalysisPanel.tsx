@@ -9,7 +9,7 @@
  *   - Neighbor impact pool per mitigation
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Cell, CellAnalysis, MitigationAction, SourceMatch } from '../types'
 
 type Props = {
@@ -97,6 +97,11 @@ function deltaToColour(delta: number): string {
 
 type HeatmapMode = 'current' | 'prev' | 'delta'
 
+function parseRgb(s: string): [number, number, number] {
+  const m = s.match(/(\d+),\s*(\d+),\s*(\d+)/)
+  return m ? [+m[1], +m[2], +m[3]] : [128, 128, 128]
+}
+
 function PrbHeatmap({
   histogram,
   histogramPrev,
@@ -105,9 +110,14 @@ function PrbHeatmap({
   histogramPrev?: number[][]
 }) {
   const [mode, setMode] = useState<HeatmapMode>('current')
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
   const N = histogram.length
   const CELL_W = Math.max(2, Math.floor(360 / 24))
   const CELL_H = Math.max(2, Math.floor(200 / N))
+  const canvasWidth = 24 * CELL_W
+  const canvasHeight = N * CELL_H
 
   const hasPrev = histogramPrev && histogramPrev.length === N
 
@@ -125,11 +135,6 @@ function PrbHeatmap({
       ? histogramPrev
       : histogram
 
-  const getCellColour = (val: number): string => {
-    if (mode === 'delta') return deltaToColour(val)
-    return dbmToColour(val)
-  }
-
   // Average delta for summary badge
   const avgDelta = useMemo(() => {
     if (!deltaMatrix) return 0
@@ -137,6 +142,54 @@ function PrbHeatmap({
     for (const row of deltaMatrix) for (const v of row) { sum += v; count++ }
     return count > 0 ? sum / count : 0
   }, [deltaMatrix])
+
+  // Draw canvas via ImageData
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const imageData = new ImageData(canvasWidth, canvasHeight)
+    const data = imageData.data
+
+    for (let rowRev = 0; rowRev < N; rowRev++) {
+      const prb = N - 1 - rowRev
+      for (let h = 0; h < 24; h++) {
+        const val = activeMatrix[prb][h]
+        const colStr = mode === 'delta' ? deltaToColour(val) : dbmToColour(val)
+        const [r, g, b] = parseRgb(colStr)
+
+        // Fill CELL_H rows × CELL_W cols for this cell
+        for (let dy = 0; dy < CELL_H; dy++) {
+          for (let dx = 0; dx < CELL_W; dx++) {
+            const px = (rowRev * CELL_H + dy) * canvasWidth + (h * CELL_W + dx)
+            const idx = px * 4
+            data[idx] = r
+            data[idx + 1] = g
+            data[idx + 2] = b
+            data[idx + 3] = 255
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0)
+  }, [activeMatrix, mode, N, CELL_W, CELL_H, canvasWidth, canvasHeight])
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const offsetX = e.clientX - rect.left
+    const offsetY = e.clientY - rect.top
+    const h = Math.min(23, Math.floor(offsetX / CELL_W))
+    const prb = Math.max(0, N - 1 - Math.floor(offsetY / CELL_H))
+    const val = activeMatrix[prb]?.[h]
+    if (val === undefined) { setTooltip(null); return }
+    const text = mode === 'delta'
+      ? `PRB ${prb}, ${h}h: Δ${val >= 0 ? '+' : ''}${val.toFixed(1)} dB`
+      : `PRB ${prb}, ${h}h: ${val.toFixed(1)} dBm`
+    setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, text })
+  }
 
   return (
     <div className="prb-heatmap-wrap">
@@ -179,31 +232,34 @@ function PrbHeatmap({
             PRB index ↑
           </span>
         </div>
-        <div
-          className="prb-heatmap-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(24, ${CELL_W}px)`,
-            gridTemplateRows: `repeat(${N}, ${CELL_H}px)`,
-            gap: 0,
-          }}
-        >
-          {Array.from({ length: N }, (_, rowRev) => {
-            const prb = N - 1 - rowRev
-            return Array.from({ length: 24 }, (_, h) => {
-              const val = activeMatrix[prb][h]
-              const label = mode === 'delta'
-                ? `PRB ${prb}, h${h}: Δ${val >= 0 ? '+' : ''}${val.toFixed(1)} dB`
-                : `PRB ${prb}, h${h}: ${val.toFixed(1)} dBm`
-              return (
-                <div
-                  key={`${prb}-${h}`}
-                  style={{ background: getCellColour(val) }}
-                  title={label}
-                />
-              )
-            })
-          })}
+        <div style={{ position: 'relative' }}>
+          <canvas
+            ref={canvasRef}
+            width={canvasWidth}
+            height={canvasHeight}
+            style={{ display: 'block' }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={() => setTooltip(null)}
+          />
+          {tooltip && (
+            <div
+              style={{
+                position: 'absolute',
+                left: tooltip.x + 10,
+                top: tooltip.y - 24,
+                background: 'rgba(15,23,42,0.92)',
+                color: '#e2e8f0',
+                fontSize: 11,
+                padding: '3px 7px',
+                borderRadius: 4,
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                border: '1px solid #334155',
+              }}
+            >
+              {tooltip.text}
+            </div>
+          )}
         </div>
       </div>
       <div className="prb-heatmap-legend">
