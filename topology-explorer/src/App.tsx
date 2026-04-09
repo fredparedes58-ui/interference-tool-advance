@@ -1433,7 +1433,13 @@ function App() {
         </section>
       )}
 
-      <ChatBot ragContext={chatbotContext} />
+      <ChatBot
+        ragContext={chatbotContext}
+        topology={topology}
+        kpiData={kpiData}
+        interferenceIssues={interferenceIssues}
+        allSitesForAnalysis={allSitesForAnalysis}
+      />
       <OnboardingGuide />
 
       {/* Hidden file input — triggered by the + button */}

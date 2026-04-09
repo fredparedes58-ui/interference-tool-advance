@@ -171,3 +171,23 @@ export type NormalizedTopology = {
   links: Link[]
   interferenceSamples: InterferenceSample[]
 }
+
+// Shared type for interference issue (used by App, ChatBot, useToolExecutor)
+export type InterferenceIssue = {
+  cellId: string
+  siteId: string
+  siteName: string
+  region: string
+  issueType: string
+  score: number
+  details: string
+  suggestion: string
+}
+
+// Type for allSitesForAnalysis passed to analyzeCell / useToolExecutor
+export type SiteForAnalysis = {
+  id: string
+  lat: number
+  lon: number
+  cells: string[]
+}

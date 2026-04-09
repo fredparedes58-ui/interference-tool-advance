@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
+import { useToolExecutor } from '../hooks/useToolExecutor'
+import type { NormalizedTopology, InterferenceIssue, SiteForAnalysis } from '../types'
+import type { KpiDataset } from './KPIPanel'
 
 const HISTORY_KEY = 'hunter-chat-history'
-const MAX_STORED = 10 // max conversations stored
+const MAX_STORED = 10
+const MAX_TOOL_CALLS = 5
+
+const EMPTY_TOPOLOGY: NormalizedTopology = {
+  version: '',
+  sites: [],
+  cells: [],
+  links: [],
+  interferenceSamples: [],
+}
 
 type Message = {
   id: number
@@ -27,8 +39,23 @@ export type ChatBotContext = {
   kpis?: string | null
 }
 
+// Anthropic message format used in API calls (no SDK import needed client-side)
+type ApiContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+
+type ApiMessage = {
+  role: 'user' | 'assistant'
+  content: string | ApiContentBlock[]
+}
+
 type Props = {
   ragContext?: ChatBotContext
+  topology?: NormalizedTopology | null
+  kpiData?: KpiDataset | null
+  interferenceIssues?: InterferenceIssue[]
+  allSitesForAnalysis?: SiteForAnalysis[]
 }
 
 const WELCOME: Message = {
@@ -78,12 +105,19 @@ function saveHistory(convs: StoredConversation[]) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(convs.slice(0, MAX_STORED))) } catch { /* ignore */ }
 }
 
-export default function ChatBot({ ragContext }: Props) {
+function buildApiMessages(msgs: Message[]): ApiMessage[] {
+  return msgs
+    .filter(m => m.id > 0)
+    .map(m => ({ role: m.role, content: m.content }))
+}
+
+export default function ChatBot({ ragContext, topology, kpiData, interferenceIssues, allSitesForAnalysis }: Props) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([WELCOME])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [docsOpen, setDocsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -93,6 +127,14 @@ export default function ChatBot({ ragContext }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(1)
   const currentConvId = useRef<string>(Date.now().toString())
+  const apiMessagesRef = useRef<ApiMessage[]>([])
+
+  const { executeToolCall } = useToolExecutor({
+    topology: topology ?? EMPTY_TOPOLOGY,
+    kpiData: kpiData ?? null,
+    interferenceIssues: interferenceIssues ?? [],
+    allSitesForAnalysis: allSitesForAnalysis ?? [],
+  })
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 100)
@@ -102,7 +144,6 @@ export default function ChatBot({ ragContext }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
-  // Auto-save conversation when there are user messages
   useEffect(() => {
     const userMsgs = messages.filter(m => m.role === 'user')
     if (userMsgs.length === 0 || loading) return
@@ -145,42 +186,115 @@ export default function ChatBot({ ragContext }: Props) {
     setInput('')
     setLoading(true)
     setError(null)
+    setToolStatus(null)
 
-    const history = [...messages, userMsg]
-      .filter(m => m.id > 0)
-      .map(m => ({ role: m.role, content: m.content }))
+    apiMessagesRef.current.push({ role: 'user', content: text })
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: history,
-          context: {
-            topology: ragContext?.topology ?? null,
-            selectedCell: ragContext?.selectedCell ?? null,
-            kpis: ragContext?.kpis ?? null,
-            docs: docs.length > 0 ? docs : undefined,
-          },
-        }),
-      })
+    const assistantId = nextId.current++
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
-      if (!res.ok || !res.body) {
-        setError('Error del servidor')
+    let toolCallCount = 0
+
+    // Multi-turn tool use loop
+    for (;;) {
+      let res: Response
+      try {
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: apiMessagesRef.current,
+            context: {
+              topology: ragContext?.topology ?? null,
+              selectedCell: ragContext?.selectedCell ?? null,
+              kpis: ragContext?.kpis ?? null,
+              docs: docs.length > 0 ? docs : undefined,
+            },
+          }),
+        })
+      } catch {
+        setError('No se pudo conectar. Verifica tu conexión.')
+        setLoading(false)
+        setToolStatus(null)
+        return
+      }
+
+      if (!res.ok) {
+        try {
+          const errJson = await res.json() as { error?: string }
+          setError(errJson.error ?? 'Error del servidor')
+        } catch {
+          setError('Error del servidor')
+        }
+        setLoading(false)
+        setToolStatus(null)
+        return
+      }
+
+      const contentType = res.headers.get('Content-Type') ?? ''
+
+      // ── Tool calls branch ────────────────────────────────────────────────────
+      if (contentType.includes('application/json')) {
+        if (toolCallCount >= MAX_TOOL_CALLS) {
+          setError('Límite de herramientas alcanzado.')
+          setLoading(false)
+          setToolStatus(null)
+          return
+        }
+
+        let json: {
+          type: string
+          toolCalls: Array<{ id: string; name: string; input: unknown }>
+          assistantContent: ApiContentBlock[]
+        }
+        try {
+          json = await res.json()
+        } catch {
+          setError('Error procesando respuesta del servidor')
+          setLoading(false)
+          setToolStatus(null)
+          return
+        }
+
+        // Append assistant's tool_use blocks to API history
+        apiMessagesRef.current.push({ role: 'assistant', content: json.assistantContent })
+
+        // Show tool activity indicator
+        const toolNames = json.toolCalls.map(tc => tc.name.replace(/_/g, ' ')).join(', ')
+        setToolStatus(`Consultando: ${toolNames}`)
+
+        // Execute all tool calls client-side (data lives in browser)
+        const toolResults: ApiContentBlock[] = await Promise.all(
+          json.toolCalls.map(async (tc) => ({
+            type: 'tool_result' as const,
+            tool_use_id: tc.id,
+            content: await executeToolCall({ id: tc.id, name: tc.name, input: tc.input }),
+          }))
+        )
+
+        // Append tool results as user message
+        apiMessagesRef.current.push({ role: 'user', content: toolResults })
+        toolCallCount++
+        continue
+      }
+
+      // ── SSE stream (end_turn) ────────────────────────────────────────────────
+      setToolStatus(null)
+
+      if (!res.body) {
+        setError('Error en streaming')
         setLoading(false)
         return
       }
 
-      // Add empty assistant message to stream into
-      const assistantId = nextId.current++
-      setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
-
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let finalText = ''
+      let streamDone = false
 
-      const pump = async () => {
-        while (true) {
+      try {
+        while (!streamDone) {
           const { done, value } = await reader.read()
           if (done) break
           buffer += decoder.decode(value, { stream: true })
@@ -189,31 +303,31 @@ export default function ChatBot({ ragContext }: Props) {
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue
             const raw = line.slice(6).trim()
-            if (raw === '[DONE]') { setLoading(false); return }
+            if (raw === '[DONE]') { streamDone = true; break }
             try {
               const parsed = JSON.parse(raw) as { delta?: string; error?: string }
-              if (parsed.error) { setError(parsed.error); setLoading(false); return }
-              if (parsed.delta) {
+              if (parsed.error) { setError(parsed.error); streamDone = true; break }
+              const delta = parsed.delta
+              if (delta) {
+                finalText += delta
                 setMessages(prev =>
                   prev.map(m =>
-                    m.id === assistantId
-                      ? { ...m, content: m.content + parsed.delta }
-                      : m
+                    m.id === assistantId ? { ...m, content: m.content + delta } : m
                   )
                 )
               }
-            } catch { /* skip malformed line */ }
+            } catch { /* skip malformed SSE line */ }
           }
         }
-        setLoading(false)
+      } catch {
+        setError('Error en streaming')
       }
 
-      pump().catch(() => { setError('Error en streaming'); setLoading(false) })
-      return  // don't hit the finally block's setLoading — pump handles it
-    } catch {
-      setError('No se pudo conectar. Verifica tu conexión.')
-    } finally {
+      if (finalText) {
+        apiMessagesRef.current.push({ role: 'assistant', content: finalText })
+      }
       setLoading(false)
+      return
     }
   }
 
@@ -247,7 +361,7 @@ export default function ChatBot({ ragContext }: Props) {
             <span className="material-icons-round chatbot-header-icon">smart_toy</span>
             <div>
               <div className="chatbot-title">Hunter</div>
-              <div className="chatbot-subtitle">RF Analyst · RAG activo</div>
+              <div className="chatbot-subtitle">RF Analyst · Tool Use activo</div>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <button
@@ -267,6 +381,7 @@ export default function ChatBot({ ragContext }: Props) {
                   setError(null)
                   setHistoryOpen(false)
                   nextId.current = 1
+                  apiMessagesRef.current = []
                 }}
                 title="Nueva conversación"
               >
@@ -293,6 +408,7 @@ export default function ChatBot({ ragContext }: Props) {
                       currentConvId.current = conv.id
                       setMessages(conv.messages)
                       nextId.current = Math.max(...conv.messages.map(m => m.id)) + 1
+                      apiMessagesRef.current = buildApiMessages(conv.messages)
                       setHistoryOpen(false)
                     }}
                   >
@@ -398,7 +514,10 @@ export default function ChatBot({ ragContext }: Props) {
               <div className="chatbot-msg chatbot-msg--bot">
                 <span className="chatbot-avatar material-icons-round">smart_toy</span>
                 <div className="chatbot-bubble chatbot-typing">
-                  <span /><span /><span />
+                  {toolStatus
+                    ? <span style={{ fontSize: 11, opacity: 0.75, fontStyle: 'italic' }}>{toolStatus}</span>
+                    : <><span /><span /><span /></>
+                  }
                 </div>
               </div>
             )}
