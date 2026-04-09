@@ -19,6 +19,7 @@ type Props = {
   allCells: Cell[]
   onClose: () => void
   onCompare?: () => void
+  onInvestigate?: (cellId: string) => void
 }
 
 // ---- colour helpers ---------------------------------------------------------
@@ -437,7 +438,7 @@ function FeatureRow({ label, value, unit = '' }: { label: string; value: number;
 
 // ---- Main panel ------------------------------------------------------------
 
-export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, onCompare }: Props) {
+export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, onCompare, onInvestigate }: Props) {
   const [expandedAction, setExpandedAction] = useState<string | null>(
     analysis?.mitigations[0]?.id ?? null
   )
@@ -695,6 +696,19 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, o
                 )
               })}
             </div>
+          </div>
+        )}
+
+        {/* Deep investigation CTA */}
+        {onInvestigate && (
+          <div className="cap-section" style={{ paddingBottom: 4 }}>
+            <button
+              className="cap-investigate-btn"
+              onClick={() => onInvestigate(cell.id)}
+            >
+              <span className="material-icons-round" style={{ fontSize: 16 }}>manage_search</span>
+              Investigar en profundidad con IA
+            </button>
           </div>
         )}
 

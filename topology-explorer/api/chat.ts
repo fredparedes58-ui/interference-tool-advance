@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { ALL_TOOLS, MAX_TOOL_CALLS } from './_tools'
 
 export const config = { runtime: 'edge' }
 
@@ -309,87 +310,8 @@ type RagContext = {
   docs?: Array<{ name: string; text: string }>
 }
 
-// ── Tool definitions for Claude Tool Use ────────────────────────────────────
-
-const HUNTER_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'analyze_cell',
-    description: 'Ejecuta el clasificador de interferencia completo para una celda con PRB histogram. Retorna: fuentes de interferencia clasificadas por confianza (0-1), evidencias, severidad, y acciones de mitigación Ericsson con feature IDs. Úsalo SIEMPRE cuando el usuario pregunte sobre interferencia de una celda específica.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        cellId: { type: 'string', description: 'ID exacto de la celda a analizar (ej: GALX1A00, MADX2B01)' },
-      },
-      required: ['cellId'],
-    },
-  },
-  {
-    name: 'get_kpi_data',
-    description: 'Obtiene los KPIs horarios (24 horas) de una celda para una fecha. Retorna: disponibilidad, ERAB accesibilidad, PRB utilización, throughput DL, PDCCH, usuarios RRC y metadatos de umbrales. Úsalo cuando el usuario pregunte por rendimiento, tendencias o degradación de KPIs.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        cellId: { type: 'string', description: 'ID de la celda' },
-        date: { type: 'string', description: 'Fecha en formato YYYY-MM-DD. Si se omite, usa la última fecha disponible.' },
-        kpiKeys: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'KPIs específicos a retornar (ej: ["cell_avail","prb_dl"]). Si se omite, retorna todos.',
-        },
-      },
-      required: ['cellId'],
-    },
-  },
-  {
-    name: 'calculate_fm_harmonics',
-    description: 'Calcula qué armónicos (orden 2–12) de una emisora FM caen dentro de la banda UL LTE especificada. Retorna frecuencia exacta, posición % en la banda y PRBs afectados aproximados. Úsalo ante sospecha de FM_RADIO_HARMONIC.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        fmFreqMhz: { type: 'number', description: 'Frecuencia de la emisora FM en MHz (rango típico: 87–108)' },
-        bandNum: { type: 'number', description: 'Número de banda LTE (ej: 5 para B5, 20 para B20, 28 para B28)' },
-      },
-      required: ['fmFreqMhz', 'bandNum'],
-    },
-  },
-  {
-    name: 'find_nearby_cells',
-    description: 'Encuentra todas las celdas dentro de un radio geográfico respecto a una celda de referencia. Retorna distancia, tech, banda y vendor de cada celda. Úsalo para análisis de co-interferencia, impacto de mitigaciones o propagación de BDA.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        cellId: { type: 'string', description: 'Celda de referencia' },
-        radiusKm: { type: 'number', description: 'Radio de búsqueda en km (recomendado: ≤10 para BDA, ≤50 para ducting)' },
-      },
-      required: ['cellId', 'radiusKm'],
-    },
-  },
-  {
-    name: 'get_top_interference_issues',
-    description: 'Retorna las celdas con mayor score de interferencia en la red cargada actualmente, ordenadas por severidad. Úsalo para resúmenes de red, priorización de acciones o cuando el usuario pregunte qué celdas tienen más problemas.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        limit: { type: 'number', description: 'Máximo de resultados a retornar (default: 10, máx: 50)' },
-        minScore: { type: 'number', description: 'Score mínimo 0–1 para filtrar (default: 0)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'get_cell_info',
-    description: 'Obtiene la configuración completa de una celda: tecnología, banda, ancho de banda, vendor, azimuth, tilt, PCI, EARFCN, KPI snapshot y flags CM. Úsalo antes de analizar una celda o cuando el usuario pida datos básicos de configuración.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        cellId: { type: 'string', description: 'ID de la celda' },
-      },
-      required: ['cellId'],
-    },
-  },
-]
-
-const MAX_TOOL_CALLS = 5
+// ── Tool definitions — imported from shared registry ─────────────────────────
+const HUNTER_TOOLS = ALL_TOOLS
 
 function buildContextBlock(ctx: RagContext): string {
   const parts: string[] = []

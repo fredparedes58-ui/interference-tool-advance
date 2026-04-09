@@ -9,6 +9,10 @@ import type { KpiDataset } from './components/KPIPanel'
 import ChatBot from './components/ChatBot'
 import type { ChatBotContext } from './components/ChatBot'
 import OnboardingGuide from './components/OnboardingGuide'
+import ScoutPanel from './components/ScoutPanel'
+import InvestigatorPanel from './components/InvestigatorPanel'
+import { useScout } from './hooks/useScout'
+import { useInvestigator } from './hooks/useInvestigator'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
@@ -135,6 +139,8 @@ function App() {
   const [activeView, setActiveView] = useState<'map' | 'topology' | 'stats' | 'alerts' | 'kpi'>('map')
   const [pendingAutoApply, setPendingAutoApply] = useState(false)
   const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
+  const [showScout, setShowScout] = useState(false)
+  const [investigatingCellId, setInvestigatingCellId] = useState<string | null>(null)
   const [kpiColorKpi, setKpiColorKpi] = useState<string | null>(null)
   const [showCompare, setShowCompare] = useState(false)
   const [mapBounds, setMapBounds] = useState<MapBbox | null>(null)
@@ -902,6 +908,15 @@ function App() {
     [topology.sites, topology.cells]
   )
 
+  // ── Agent hooks ─────────────────────────────────────────────────────────────
+  const scout = useScout(topology, kpiData)
+  const investigator = useInvestigator({
+    topology,
+    kpiData,
+    interferenceIssues,
+    allSitesForAnalysis,
+  })
+
   const cellAnalysis = useMemo(() => {
     if (!selectedCell?.prbHistogram || !selectedCell.bandNum) return null
     const site = topology.sites.find(s => s.id === selectedCell.siteId)
@@ -1409,7 +1424,39 @@ function App() {
           allCells={topology.cells}
           onClose={() => { setSelectedCellId(null); setShowCompare(false) }}
           onCompare={() => setShowCompare(v => !v)}
+          onInvestigate={(cellId) => { setInvestigatingCellId(cellId); investigator.reset() }}
         />
+      )}
+
+      {/* Scout Panel */}
+      {showScout && (
+        <div className="agent-panel-overlay">
+          <ScoutPanel
+            status={scout.status}
+            output={scout.output}
+            error={scout.error}
+            scanDurationMs={scout.scanDurationMs}
+            onScan={() => scout.runScan()}
+            onClose={() => setShowScout(false)}
+            onSelectCell={(cellId) => { setSelectedCellId(cellId); setShowScout(false) }}
+          />
+        </div>
+      )}
+
+      {/* Investigator Panel */}
+      {investigatingCellId && (
+        <div className="agent-panel-overlay">
+          <InvestigatorPanel
+            cellId={investigatingCellId}
+            status={investigator.status}
+            toolStatus={investigator.toolStatus}
+            toolCallCount={investigator.toolCallCount}
+            output={investigator.output}
+            error={investigator.error}
+            onInvestigate={() => investigator.investigate(investigatingCellId)}
+            onClose={() => setInvestigatingCellId(null)}
+          />
+        </div>
       )}
 
       {showCompare && selectedCell && (
@@ -1467,7 +1514,18 @@ function App() {
         }}
       />
 
-      <nav className="bottom-nav bottom-nav--6">
+      <nav className="bottom-nav bottom-nav--7">
+        <button
+          className={`nav-item ${showScout ? 'active' : ''}`}
+          onClick={() => setShowScout(v => !v)}
+          title="Scout — Escaneo automático de interferencia"
+        >
+          <span className="material-icons-round nav-icon">radar</span>
+          {scout.output && scout.output.stats.criticalCount > 0 && (
+            <span className="nav-badge" style={{ background: '#ef4444' }}>{scout.output.stats.criticalCount}</span>
+          )}
+          <span>Scout</span>
+        </button>
         <button
           className={`nav-item ${activeView === 'map' ? 'active' : ''}`}
           onClick={handleNavMap}
