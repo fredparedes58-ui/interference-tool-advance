@@ -523,21 +523,113 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, interferen
               {cell.kpi?.pucch_bler_avg !== undefined && <><span style={{ color: '#64748b' }}>PUCCH BLER</span><span>{(cell.kpi.pucch_bler_avg * 100).toFixed(1)}%</span></>}
             </div>
           </div>
-          <div className="cap-section" style={{ marginTop: 16 }}>
+          {/* Interference KPIs summary badges */}
+          {cell.kpi && (
+            <div className="cap-section">
+              <div className="cap-section-title">
+                <span className="material-icons-round" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4, color: '#ef4444' }}>warning</span>
+                KPIs de interferencia
+              </div>
+              <div className="cap-intf-kpis">
+                {cell.kpi.rssi_avg_dbm != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#ef4444' }}>
+                    NI avg: <strong>{cell.kpi.rssi_avg_dbm.toFixed(1)} dBm</strong>
+                  </span>
+                )}
+                {cell.kpi.pusch_bler_avg != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#f97316' }}>
+                    PUSCH BLER: <strong>{(cell.kpi.pusch_bler_avg * 100).toFixed(1)}%</strong>
+                  </span>
+                )}
+                {cell.kpi.pucch_bler_avg != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#a855f7' }}>
+                    PUCCH BLER: <strong>{(cell.kpi.pucch_bler_avg * 100).toFixed(1)}%</strong>
+                  </span>
+                )}
+                {cell.kpi.ul_sinr_p50_db != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#38bdf8' }}>
+                    UL SINR: <strong>{cell.kpi.ul_sinr_p50_db.toFixed(1)} dB</strong>
+                  </span>
+                )}
+                {cell.kpi.ul_thp_mbps != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#22c55e' }}>
+                    UL Thp: <strong>{cell.kpi.ul_thp_mbps.toFixed(1)} Mbps</strong>
+                  </span>
+                )}
+                {cell.kpi.prb_util_ul != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#eab308' }}>
+                    PRB Util UL: <strong>{(cell.kpi.prb_util_ul * 100).toFixed(0)}%</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Hourly interference chart (PUSCH / PUCCH / NI) */}
+          {intfChartData.length > 0 && (
+            <div className="cap-section">
+              <div className="cap-section-title">
+                <span className="material-icons-round" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4, color: '#f97316' }}>cell_tower</span>
+                Interferencia por hora
+              </div>
+              <div style={{ width: '100%', height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={intfChartData} margin={{ top: 4, right: 50, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                    <XAxis dataKey="hora" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                    <YAxis yAxisId="bler" tick={{ fill: '#94a3b8', fontSize: 10 }} width={35} domain={[0, 'auto']} />
+                    <YAxis yAxisId="ni" orientation="right" tick={{ fill: '#ef4444', fontSize: 10 }} width={42} />
+                    <Tooltip
+                      contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
+                      labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
+                      formatter={(value, name) => {
+                        const v = Number(value ?? 0)
+                        if (String(name).includes('NI')) return [`${v.toFixed(1)} dBm`, String(name)]
+                        if (String(name).includes('Score')) return [v.toFixed(2), String(name)]
+                        return [`${(v * 100).toFixed(1)}%`, String(name)]
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 10, paddingTop: 2 }} />
+                    <Bar yAxisId="bler" dataKey="pusch_bler" name="PUSCH BLER" fill="#f97316" fillOpacity={0.75} radius={[2,2,0,0]} barSize={6} />
+                    <Bar yAxisId="bler" dataKey="pucch_bler" name="PUCCH BLER" fill="#a855f7" fillOpacity={0.75} radius={[2,2,0,0]} barSize={6} />
+                    <Line yAxisId="ni" type="monotone" dataKey="ni_db" name="NI (dBm)" stroke="#ef4444" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                    <Line yAxisId="bler" type="monotone" dataKey="score" name="Score" stroke="#eab308" strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />
+                    <ReferenceLine yAxisId="bler" y={0.2} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={1} />
+                    <ReferenceLine yAxisId="bler" y={0.1} stroke="#eab308" strokeDasharray="4 2" strokeWidth={1} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Deep investigation CTA */}
+          {onInvestigate && (
+            <div className="cap-section" style={{ paddingBottom: 4 }}>
+              <button
+                className="cap-investigate-btn"
+                onClick={() => onInvestigate(cell.id)}
+              >
+                <span className="material-icons-round" style={{ fontSize: 16 }}>manage_search</span>
+                Investigar en profundidad con IA
+              </button>
+            </div>
+          )}
+
+          {/* Info note about PRB classifier */}
+          <div className="cap-section" style={{ marginTop: 4 }}>
             <div
               style={{
                 background: '#1e293b',
                 border: '1px solid #334155',
                 borderRadius: 8,
-                padding: '12px 16px',
-                fontSize: '0.82rem',
+                padding: '10px 14px',
+                fontSize: '0.76rem',
                 color: '#94a3b8',
-                lineHeight: 1.6,
+                lineHeight: 1.5,
               }}
             >
-              <span className="material-icons-round" style={{ fontSize: 16, verticalAlign: 'middle', marginRight: 6, color: '#38bdf8' }}>info</span>
-              Sin datos PRB para clasificar interferencia.<br />
-              Usa <strong style={{ color: '#e2e8f0' }}>py parse_enm_topology.py --kpi-file kpis.csv</strong> para habilitar el clasificador.
+              <span className="material-icons-round" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4, color: '#38bdf8' }}>info</span>
+              Para clasificación de fuente de interferencia con IA, sube un topology JSON con <strong style={{ color: '#e2e8f0' }}>prbHistogram</strong>.
             </div>
           </div>
         </div>

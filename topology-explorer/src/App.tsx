@@ -1040,11 +1040,11 @@ function App() {
   const handleSelectHotspot = useCallback((siteId: string) => {
     setSelectedSiteId(siteId)
     setZoomSignal((prev) => prev + 1)
-    setActiveView('alerts')
+    setActiveView('map') // stay on map so CellAnalysisPanel shows inline
     // Auto-select the most affected cell of the site to open CellAnalysisPanel
     const siteCells = topology.cells.filter(c => c.siteId === siteId)
     if (siteCells.length > 0) {
-      // Prefer cells with PRB data, else pick first
+      // Prefer cells with PRB data, else pick worst KPI
       const withPrb = siteCells.find(c => c.prbHistogram && c.prbHistogram.length > 0)
       const worstKpi = siteCells.reduce((best, c) => {
         const score = (c.kpi?.pusch_bler_avg ?? 0) + (c.kpi?.pucch_bler_avg ?? 0)
