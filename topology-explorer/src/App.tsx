@@ -11,8 +11,10 @@ import type { ChatBotContext } from './components/ChatBot'
 import OnboardingGuide from './components/OnboardingGuide'
 import ScoutPanel from './components/ScoutPanel'
 import InvestigatorPanel from './components/InvestigatorPanel'
+import PlannerPanel from './components/PlannerPanel'
 import { useScout } from './hooks/useScout'
 import { useInvestigator } from './hooks/useInvestigator'
+import { usePlanner } from './hooks/usePlanner'
 import StatCard from './components/StatCard'
 import sampleTopology from './sampleTopology'
 import { normalizeTopology } from './topoNormalize'
@@ -141,6 +143,7 @@ function App() {
   const [kpiData, setKpiData] = useState<KpiDataset | null>(null)
   const [showScout, setShowScout] = useState(false)
   const [investigatingCellId, setInvestigatingCellId] = useState<string | null>(null)
+  const [showPlanner, setShowPlanner] = useState(false)
   const [kpiColorKpi, setKpiColorKpi] = useState<string | null>(null)
   const [showCompare, setShowCompare] = useState(false)
   const [mapBounds, setMapBounds] = useState<MapBbox | null>(null)
@@ -916,6 +919,12 @@ function App() {
     interferenceIssues,
     allSitesForAnalysis,
   })
+  const planner = usePlanner({
+    topology,
+    kpiData,
+    interferenceIssues,
+    allSitesForAnalysis,
+  })
 
   const cellAnalysis = useMemo(() => {
     if (!selectedCell?.prbHistogram || !selectedCell.bandNum) return null
@@ -1422,6 +1431,7 @@ function App() {
           cell={selectedCell}
           analysis={cellAnalysis}
           allCells={topology.cells}
+          interferenceSamples={interferenceSamples}
           onClose={() => { setSelectedCellId(null); setShowCompare(false) }}
           onCompare={() => setShowCompare(v => !v)}
           onInvestigate={(cellId) => { setInvestigatingCellId(cellId); investigator.reset() }}
@@ -1459,6 +1469,20 @@ function App() {
         </div>
       )}
 
+      {/* Planner Panel */}
+      {showPlanner && (
+        <div className="agent-panel-overlay">
+          <PlannerPanel
+            status={planner.status}
+            toolStatus={planner.toolStatus}
+            output={planner.output}
+            error={planner.error}
+            onGenerate={(constraint, horizon) => planner.generatePlan(constraint, horizon)}
+            onClose={() => setShowPlanner(false)}
+          />
+        </div>
+      )}
+
       {showCompare && selectedCell && (
         <ComparePanel
           cellA={selectedCell}
@@ -1474,6 +1498,7 @@ function App() {
             kpiData={kpiData}
             selectedCellId={selectedCellId}
             cellPrbHistogram={selectedCell?.prbHistogram ?? null}
+            interferenceSamples={interferenceSamples}
             onClose={() => setActiveView('map')}
             onUploadKpi={() => kpiFileInputRef.current?.click()}
           />
@@ -1514,7 +1539,7 @@ function App() {
         }}
       />
 
-      <nav className="bottom-nav bottom-nav--7">
+      <nav className="bottom-nav bottom-nav--8">
         <button
           className={`nav-item ${showScout ? 'active' : ''}`}
           onClick={() => setShowScout(v => !v)}
@@ -1557,6 +1582,17 @@ function App() {
           <span className="material-icons-round nav-icon">bar_chart</span>
           {kpiData && <span className="nav-badge nav-badge--green">✓</span>}
           <span>KPIs</span>
+        </button>
+        <button
+          className={`nav-item ${showPlanner ? 'active' : ''}`}
+          onClick={() => setShowPlanner(v => !v)}
+          title="Planner — Plan de acción CM/Campo"
+        >
+          <span className="material-icons-round nav-icon">event_note</span>
+          {planner.output && planner.output.summary.criticalActionsThisWeek > 0 && (
+            <span className="nav-badge" style={{ background: '#a78bfa' }}>{planner.output.summary.criticalActionsThisWeek}</span>
+          )}
+          <span>Planner</span>
         </button>
         <button
           className={`nav-item ${activeView === 'alerts' ? 'active' : ''}`}

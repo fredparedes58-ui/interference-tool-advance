@@ -10,13 +10,18 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Cell, CellAnalysis, MitigationAction, SourceMatch } from '../types'
+import {
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  Legend, ResponsiveContainer, ReferenceLine,
+} from 'recharts'
+import type { Cell, CellAnalysis, MitigationAction, SourceMatch, InterferenceSample } from '../types'
 import { exportCellPdf } from '../utils/pdfReport'
 
 type Props = {
   cell: Cell
   analysis: CellAnalysis | null
   allCells: Cell[]
+  interferenceSamples?: InterferenceSample[]
   onClose: () => void
   onCompare?: () => void
   onInvestigate?: (cellId: string) => void
@@ -438,12 +443,38 @@ function FeatureRow({ label, value, unit = '' }: { label: string; value: number;
 
 // ---- Main panel ------------------------------------------------------------
 
-export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, onCompare, onInvestigate }: Props) {
+export default function CellAnalysisPanel({ cell, analysis, allCells, interferenceSamples, onClose, onCompare, onInvestigate }: Props) {
   const [expandedAction, setExpandedAction] = useState<string | null>(
     analysis?.mitigations[0]?.id ?? null
   )
   const [showFeatures, setShowFeatures] = useState(false)
   const heatmapCanvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Build PUSCH/PUCCH/NI chart data from interference samples
+  const intfChartData = useMemo(() => {
+    if (!interferenceSamples) return []
+    const cellSamples = interferenceSamples.filter(s => s.cellId === cell.id)
+    if (cellSamples.length === 0) return []
+    const byHour = new Map<string, { ni: number[]; pusch: number[]; pucch: number[]; score: number[] }>()
+    for (const s of cellSamples) {
+      if (!byHour.has(s.hour)) byHour.set(s.hour, { ni: [], pusch: [], pucch: [], score: [] })
+      const b = byHour.get(s.hour)!
+      if (s.ni_db != null) b.ni.push(s.ni_db)
+      if (s.pusch_bler != null) b.pusch.push(s.pusch_bler)
+      if (s.pucch_bler != null) b.pucch.push(s.pucch_bler)
+      if (s.score != null) b.score.push(s.score)
+    }
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a,b) => a+b, 0) / arr.length * 1000) / 1000 : null
+    return [...byHour.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([hour, b]) => ({
+        hora: hour,
+        ni_db: avg(b.ni),
+        pusch_bler: avg(b.pusch),
+        pucch_bler: avg(b.pucch),
+        score: avg(b.score),
+      }))
+  }, [interferenceSamples, cell.id])
 
   // No PRB data available — show basic cell info panel
   if (!analysis) {
@@ -618,6 +649,69 @@ export default function CellAnalysisPanel({ cell, analysis, allCells, onClose, o
               histogramPrev={cell.prbHistogramPrev}
               externalRef={heatmapCanvasRef}
             />
+          </div>
+        )}
+
+        {/* Interference KPIs: PUSCH BLER / PUCCH BLER / NI by hour */}
+        {intfChartData.length > 0 && (
+          <div className="cap-section">
+            <div className="cap-section-title">
+              <span className="material-icons-round" style={{ fontSize: 14, verticalAlign: 'middle', marginRight: 4, color: '#f97316' }}>cell_tower</span>
+              Interferencia por hora
+            </div>
+            <div style={{ width: '100%', height: 180 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={intfChartData} margin={{ top: 4, right: 50, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="hora" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis yAxisId="bler" tick={{ fill: '#94a3b8', fontSize: 10 }} width={35}
+                    domain={[0, 'auto']} />
+                  <YAxis yAxisId="ni" orientation="right" tick={{ fill: '#ef4444', fontSize: 10 }} width={42} />
+                  <Tooltip
+                    contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
+                    labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
+                    formatter={(value, name) => {
+                      const v = Number(value ?? 0)
+                      if (String(name).includes('NI')) return [`${v.toFixed(1)} dBm`, String(name)]
+                      if (String(name).includes('Score')) return [v.toFixed(2), String(name)]
+                      return [`${(v * 100).toFixed(1)}%`, String(name)]
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 10, paddingTop: 2 }} />
+                  <Bar yAxisId="bler" dataKey="pusch_bler" name="PUSCH BLER" fill="#f97316" fillOpacity={0.75} radius={[2,2,0,0]} barSize={6} />
+                  <Bar yAxisId="bler" dataKey="pucch_bler" name="PUCCH BLER" fill="#a855f7" fillOpacity={0.75} radius={[2,2,0,0]} barSize={6} />
+                  <Line yAxisId="ni" type="monotone" dataKey="ni_db" name="NI (dBm)" stroke="#ef4444" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                  <Line yAxisId="bler" type="monotone" dataKey="score" name="Score" stroke="#eab308" strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />
+                  <ReferenceLine yAxisId="bler" y={0.2} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={1} />
+                  <ReferenceLine yAxisId="bler" y={0.1} stroke="#eab308" strokeDasharray="4 2" strokeWidth={1} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            {/* KPI summary row */}
+            {cell.kpi && (
+              <div className="cap-intf-kpis">
+                {cell.kpi.rssi_avg_dbm != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#ef4444' }}>
+                    NI avg: <strong>{cell.kpi.rssi_avg_dbm.toFixed(1)} dBm</strong>
+                  </span>
+                )}
+                {cell.kpi.pusch_bler_avg != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#f97316' }}>
+                    PUSCH: <strong>{(cell.kpi.pusch_bler_avg * 100).toFixed(1)}%</strong>
+                  </span>
+                )}
+                {cell.kpi.pucch_bler_avg != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#a855f7' }}>
+                    PUCCH: <strong>{(cell.kpi.pucch_bler_avg * 100).toFixed(1)}%</strong>
+                  </span>
+                )}
+                {cell.kpi.ul_sinr_p50_db != null && (
+                  <span className="cap-intf-kpi" style={{ borderColor: '#38bdf8' }}>
+                    UL SINR: <strong>{cell.kpi.ul_sinr_p50_db.toFixed(1)} dB</strong>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
